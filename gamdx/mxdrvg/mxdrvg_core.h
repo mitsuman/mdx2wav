@@ -36,7 +36,7 @@
 #include "../pcm8/x68pcm8.h"
 #include "../downsample/downsample.h"
 
-extern volatile unsigned char OpmReg1B;  // OPM ƒŒƒWƒXƒ^ $1B ‚Ì“à—e
+extern volatile unsigned char OpmReg1B;  // OPM ãƒ¬ã‚¸ã‚¹ã‚¿ $1B ã®å†…å®¹
 
 #define LOGOPM 0
 #define LOGPCM 0
@@ -1165,7 +1165,7 @@ L000134:;
 	*(A1) = 0x7f;
 	G.L001e17 = CLR;
 	G.L001e13 = 0x01;
-	L_PAUSE_();  // L_PAUSE()‚Ìƒ^ƒCƒ}[‚ğ~‚ß‚È‚¢
+	L_PAUSE_();  // L_PAUSE()ã®ã‚¿ã‚¤ãƒãƒ¼ã‚’æ­¢ã‚ãªã„
 	if ( !PCM8_ENABLE ) goto L000164;
 
 // L00015e:;
@@ -3464,7 +3464,7 @@ L000a26:;
 	*(A1) = 0x7f;
 	G.L001e17 = CLR;
 	G.L001e13 = 0x01;
-	L_PAUSE_();  // L_PAUSE()‚Ìƒ^ƒCƒ}[‚ğ~‚ß‚È‚¢
+	L_PAUSE_();  // L_PAUSE()ã®ã‚¿ã‚¤ãƒãƒ¼ã‚’æ­¢ã‚ãªã„
 	if ( !PCM8_ENABLE ) goto L000a56;
 
 // L000a50:;
@@ -3779,7 +3779,7 @@ L000bec:;
 														lea.l   CHBUF_FM(pc),a6
 														moveq.l #$00,d7
 */
-//	G.MUSICTIMER = D2; // ‚±‚±‚Í“ü‚ê‚È‚¢
+//	G.MUSICTIMER = D2; // ã“ã“ã¯å…¥ã‚Œãªã„
 	L_WRITEOPM();
 	G.L001ba6++;
 	A6 = &MXDRVG_WORK_CHBUF_FM[0];
@@ -4493,7 +4493,7 @@ L000ef4:;
 	ADPCMMOD_END();
 	D1 = D2;
 	D2 = D3;
-	if ( D2 > 0xff00 ) D2 = 0xff00;  // DMAƒTƒCƒY§ŒÀ
+	if ( D2 > 0xff00 ) D2 = 0xff00;  // DMAã‚µã‚¤ã‚ºåˆ¶é™
 	ADPCMOUT();
 	A2 = &G.L00223c[0];
 	A2[D7] = CLR;
@@ -4520,14 +4520,14 @@ L000f28:;
 														move.l  $0004(a0),d3
 														beq     L000f26
 														adda.l  (a0),a1
-														lea.l   L002248(pc),a0	; •s—v
-														cmpa.l  a0,a1			; •s—v
-														bcs     L000fb8			; •s—v
-														move.l  a1,d0			; •s—v
-														add.l   d3,d0			; •s—v
-														bcs     L000fb8			; •s—v
-														cmp.l   (L001bb0),d0	; •s—v
-														bcc     L000fb8			; •s—v
+														lea.l   L002248(pc),a0	; ä¸è¦
+														cmpa.l  a0,a1			; ä¸è¦
+														bcs     L000fb8			; ä¸è¦
+														move.l  a1,d0			; ä¸è¦
+														add.l   d3,d0			; ä¸è¦
+														bcs     L000fb8			; ä¸è¦
+														cmp.l   (L001bb0),d0	; ä¸è¦
+														bcc     L000fb8			; ä¸è¦
 														move.b  $0018(a6),d0
 														and.w   #$0007,d0
 														moveq.l #$00,d1
@@ -5420,7 +5420,7 @@ L00122e:;
 
 /***************************************************************/
 
-#if 0 // –{‘Ì‘¤‚ÖˆÚ“®
+#if 0 // æœ¬ä½“å´ã¸ç§»å‹•
 static void L001240(
 	void
 ) {
@@ -7242,26 +7242,26 @@ L0019b5:;
 		.dc.b   'X68k MXDRV music driver version 2.06+17 Rel.X5-S (c)1988-92'
 		.dc.b   ' milk.,K.MAEKAWA, Missy.M, Yatsube',$0d,$0a,$00
 L001a15:;
-		.dc.b   'g‚¢•û: mxdrv [switch]',$0d,$0a
-		.dc.b   $09,'-m:<num> MMLƒoƒbƒtƒ@ƒTƒCƒY(Kbytes)',$09,$09,'[È—ª 64'
+		.dc.b   'ä½¿ã„æ–¹: mxdrv [switch]',$0d,$0a
+		.dc.b   $09,'-m:<num> MMLãƒãƒƒãƒ•ã‚¡ã‚µã‚¤ã‚º(Kbytes)',$09,$09,'[çœç•¥æ™‚ 64'
 		.dc.b   ']',$0d,$0a
-		.dc.b   $09,'-p:<num> PCMƒoƒbƒtƒ@ƒTƒCƒY(Kbytes)',$09,$09,'[È—ª312'
+		.dc.b   $09,'-p:<num> PCMãƒãƒƒãƒ•ã‚¡ã‚µã‚¤ã‚º(Kbytes)',$09,$09,'[çœç•¥æ™‚312'
 		.dc.b   ']',$0d,$0a
-		.dc.b   $09,'-b:<num> LINKƒoƒbƒtƒ@ƒTƒCƒY(banks)',$09,$09,'[È—ª  2'
+		.dc.b   $09,'-b:<num> LINKãƒãƒƒãƒ•ã‚¡ã‚µã‚¤ã‚º(banks)',$09,$09,'[çœç•¥æ™‚  2'
 		.dc.b   ']',$0d,$0a
-		.dc.b   $09,'-f:<num> FADEOUT SPEED (FAST 0 - 32767 SLOW)',$09,'[È—ª'
-		.dc.b   ' 23]',$0d,$0a
-		.dc.b   $09,'-r       mxdrv‰ğœ',$0d,$0a,$00
+		.dc.b   $09,'-f:<num> FADEOUT SPEED (FAST 0 - 32767 SLOW)',$09,'[çœç•¥'
+		.dc.b   'æ™‚ 23]',$0d,$0a
+		.dc.b   $09,'-r       mxdrvè§£é™¤',$0d,$0a,$00
 L001b14:;
-		.dc.b   $09,'ƒƒ‚ƒŠ‚ª•s‘«‚µ‚Ä‚¢‚Ü‚·',$0d,$0a,$00
+		.dc.b   $09,'ãƒ¡ãƒ¢ãƒªãŒä¸è¶³ã—ã¦ã„ã¾ã™',$0d,$0a,$00
 L001b2e:;
-		.dc.b   $09,'mxdrv‚ğ‰ğœ‚µ‚Ü‚µ‚½',$0d,$0a,$00
+		.dc.b   $09,'mxdrvã‚’è§£é™¤ã—ã¾ã—ãŸ',$0d,$0a,$00
 L001b45:;
-		.dc.b   $09,'mxdrv‚Í‚·‚Å‚É‘g‚İ‚Ü‚ê‚Ä‚¢‚Ü‚·',$0d,$0a,$00
+		.dc.b   $09,'mxdrvã¯ã™ã§ã«çµ„ã¿è¾¼ã¾ã‚Œã¦ã„ã¾ã™',$0d,$0a,$00
 L001b68:;
-		.dc.b   $09,'mxdrv‚Í‘g‚İ‚Ü‚ê‚Ä‚¢‚Ü‚¹‚ñ',$0d,$0a,$00
+		.dc.b   $09,'mxdrvã¯çµ„ã¿è¾¼ã¾ã‚Œã¦ã„ã¾ã›ã‚“',$0d,$0a,$00
 L001b87:;
-		.dc.b   $09,'mxdrv‚ğ‰ğœo—ˆ‚Ü‚¹‚ñ‚Å‚µ‚½',$0d,$0a,$00
+		.dc.b   $09,'mxdrvã‚’è§£é™¤å‡ºæ¥ã¾ã›ã‚“ã§ã—ãŸ',$0d,$0a,$00
 
 		.data
 
