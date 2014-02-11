@@ -37,6 +37,11 @@
 //
 namespace FM
 {
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-braces"
+#endif
+
 	const uint8 Operator::notetable[128] =
 	{
 		 0,  0,  0,  0,  0,  0,  0,  1,  2,  3,  3,  3,  3,  3,  3,  3, 
@@ -165,6 +170,9 @@ namespace FM
 		0, 1,  2, 0,  2, 0,		// 15
 		1,-1,  2, 0,  2, 0,		// 15 60~
 	};
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 	// fixed equasion-based tables
 	int		pmtable[2][8][FM_LFOENTS];
@@ -212,7 +220,7 @@ void MakeLFOTable()
 			double pmb = pms[type][i];
 			for (int j=0; j<FM_LFOENTS; j++)
 			{
-				double v = pow(2.0, pmb * (2 * j - FM_LFOENTS+1) / (FM_LFOENTS-1));
+//				double v = pow(2.0, pmb * (2 * j - FM_LFOENTS+1) / (FM_LFOENTS-1));
 				double w = 0.6 * pmb * sin(2 * j * 3.14159265358979323846 / FM_LFOENTS) + 1;
 //				pmtable[type][i][j] = int(0x10000 * (v - 1));
 //				if (type == 0)
@@ -402,6 +410,8 @@ void Operator::Prepare()
 		case release:
 			SetEGRate(Min(63, rr_ + key_scale_rate_));
 			break;
+		default:
+          break;
 		}
 
 		// SSG-EG
@@ -579,6 +589,8 @@ void FM::Operator::EGCalc()
 					break;
 				case release:
 					ShiftPhase(off);
+					break;
+				default:
 					break;
 				}
 			}
@@ -815,7 +827,7 @@ void Channel4::SetAlgorithm(uint algo)
 //  合成
 ISample Channel4::Calc()
 {
-	int r;
+	int r = 0;
 	switch (algo_)
 	{
 	case 0:
@@ -875,7 +887,7 @@ ISample Channel4::CalcL()
 {
 	chip_->SetPMV(pms[chip_->GetPML()]);
 
-	int r;
+	int r = 0;
 	switch (algo_)
 	{
 	case 0:

@@ -1,17 +1,29 @@
 #if !defined(__FMXDRVG_DOWNSAMPLE_GLOBAL_H__)
 #define __FMXDRVG_DOWNSAMPLE_GLOBAL_H__
 
+#if defined(__GNUC__)
+ #pragma GCC diagnostic push
+ #pragma GCC diagnostic ignored "-Wmissing-braces"
+ #define ALIGNED(x) __attribute__ ((aligned (x)))
+#elif defined(_MSC_VER)
+ #define ALIGNED(x) __declspec(align(x))
+#else
+ #define ALIGNED(x)
+#endif
+
 #define LPF_ROW_44 441
-static double lowpass_dummy_44; // 64bit境界合わせ
-static int16 LOWPASS_44[LPF_ROW_44][LPF_COL] = {
+ALIGNED(8) static int16 LOWPASS_44[LPF_ROW_44][LPF_COL] = {
 	#include "lowpass_44.dat"
 };
 
 #define LPF_ROW_48 96
-static double lowpass_dummy_48; // 64bit境界合わせ
-static int16 LOWPASS_48[LPF_ROW_48][LPF_COL] = {
+ALIGNED(8) static int16 LOWPASS_48[LPF_ROW_48][LPF_COL] = {
 	#include "lowpass_48.dat"
 };
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 static int LPF_ROW = LPF_ROW_44;
 static int16 *LOWPASS = (int16 *)LOWPASS_44;
