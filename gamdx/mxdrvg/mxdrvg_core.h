@@ -27,6 +27,7 @@
 
 //         .text
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <float.h>
@@ -2419,7 +2420,7 @@ static void L0005f8(
 ) {
 	ULONG d1;
 	UBYTE volatile *a0, *a1, *a2;
-	ULONG volatile *a1_l, *a0_l;
+	uint32_t volatile *a1_l, *a0_l;
 
 // L0005f8:;
 /*
@@ -2439,7 +2440,7 @@ static void L0005f8(
 	A2 = a2, A1 = a1, A0 = a0, D1 = d1;
 	D0 = D1;
 	D0 &= 0x0003;
-	a1_l = (ULONG *)A1; a0_l = (ULONG *)A0;
+	a1_l = (uint32_t *)A1; a0_l = (uint32_t *)A0;
 	D1 >>= 2;
 
 // L000610:;
