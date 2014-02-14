@@ -33,7 +33,7 @@
 #include <float.h>
 #include "mxdrvg.h"
 
-#include "../fmgen/opm.h"
+#include "opm_delegate.h"
 #include "../pcm8/x68pcm8.h"
 #include "../downsample/downsample.h"
 
@@ -66,19 +66,9 @@ static void SETOPMINT(
 	void (*func)( void )
 );
 
-static void OPMINTFUNC(
-	void
-);
+static void OPMINTFUNC(void);
 
-class X68OPM : public FM::OPM {
-	public:
-		virtual void Intr(bool irq) {
-			if (irq) {
-				OPMINTFUNC();
-			}
-		}
-};
-static X68OPM OPM;
+static OPM_Delegate *OPM = OPM_Delegate::getFmgen();
 static X68K::X68PCM8 PCM8;
 static X68K::DOWNSAMPLE DS;
 
@@ -289,11 +279,12 @@ int MXDRVG_Start(
 		return -1;
 	}
 
-	OPM.Init(4000000, G.INNERSAMPRATE, (G.OPMFILTER != 0));
+	OPM->Init(4000000, G.INNERSAMPRATE, (G.OPMFILTER != 0));
+	OPM->SetIrqCallback(OPMINTFUNC);
 	PCM8.Init(G.INNERSAMPRATE);
 	DS.Init(G.INNERSAMPRATE, G.SAMPRATE, ((filtermode&1) == 0));
 
-	OPM.SetVolume(-12);
+	OPM->SetVolume(-12);
 	PCM8.SetVolume(0);
 
 	ret = Initialize( mdxbufsize, pdxbufsize );
@@ -354,7 +345,7 @@ int MXDRVG_GetPCM(
 	rest_len = len;
 	while (rest_len > 0) {
 		ULONG create_len = (ULONG)rest_len;
-		ULONG event_us = OPM.GetNextEvent();
+		ULONG event_us = OPM->GetNextEvent();
 		if (event_us == 0) {
 			//
 		} else if ((SLONG)event_us < rest_us) {
@@ -374,7 +365,7 @@ int MXDRVG_GetPCM(
 		}
 		if (innerbuf) {
 			memset(innerbuf, 0, create_len2*sizeof(Sample)*2);
-			OPM.Mix(innerbuf, create_len2);
+			OPM->Mix(innerbuf, create_len2);
 			PCM8.Mix(innerbuf, create_len2);
 			if (TotalVolume != 256) {
 				for (ULONG j=0; j<create_len2; j++) {
@@ -393,7 +384,7 @@ int MXDRVG_GetPCM(
 		}
 		G.PLAYSAMPLES += create_len;
 		ULONG use_us = (create_len*1000000)/G.SAMPRATE;
-		OPM.Count(use_us);
+		OPM->Count(use_us);
 		rest_us -= use_us;
 		rest_len -= create_len;
 	}
@@ -687,7 +678,7 @@ static void OPM_SUB(
 
 	if ( MeasurePlayTime ) return;
 
-	OPM.SetReg( (UBYTE)D1, (UBYTE)D2 );
+	OPM->SetReg( (UBYTE)D1, (UBYTE)D2 );
 }
 
 /***************************************************************/

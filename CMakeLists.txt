@@ -15,6 +15,7 @@ add_executable(mdx2wav
 	gamdx/fmgen/fmtimer.cpp
 	gamdx/fmgen/opm.cpp
 	gamdx/mxdrvg/so.cpp
+	gamdx/mxdrvg/opm_delegate.cpp
 	gamdx/pcm8/pcm8.cpp
 	gamdx/pcm8/x68pcm8.cpp
 )
