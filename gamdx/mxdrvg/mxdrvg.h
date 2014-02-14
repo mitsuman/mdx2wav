@@ -132,6 +132,11 @@ enum {
 	MXDRVG_WORKADR_OPMINT,
 };
 
+enum {
+	MXDRVG_YM2151TYPE_FMGEN = 0,
+	MXDRVG_YM2151TYPE_MAME,
+};
+
 #ifndef MXDRVG_EXPORT
 #define MXDRVG_EXPORT
 #endif
@@ -141,6 +146,11 @@ extern "C" {
 #endif
 
 #ifndef __MXDRVG_LOADMODULE
+
+MXDRVG_EXPORT
+void MXDRVG_SetEmulationType(
+	int ym2151type
+);
 
 MXDRVG_EXPORT
 int MXDRVG_Start(

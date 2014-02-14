@@ -68,7 +68,7 @@ static void SETOPMINT(
 
 static void OPMINTFUNC(void);
 
-static OPM_Delegate *OPM = OPM_Delegate::getMame();
+static OPM_Delegate *OPM = OPM_Delegate::getFmgen();
 static X68K::X68PCM8 PCM8;
 static X68K::DOWNSAMPLE DS;
 
@@ -233,7 +233,20 @@ static void L_PAUSE_(
 );
 
 /***************************************************************/
+MXDRVG_EXPORT
+void MXDRVG_SetEmulationType(
+	int ym2151type
+) {
+  switch (ym2151type) {
+  case MXDRVG_YM2151TYPE_MAME:
+    OPM = OPM_Delegate::getMame();
+    break;
+  default:
+    break;
+  }
+}
 
+/***************************************************************/
 MXDRVG_EXPORT
 int MXDRVG_Start(
 	int samprate,

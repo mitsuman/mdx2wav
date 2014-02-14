@@ -216,6 +216,7 @@ void help() {
     "  mdx2wav xxx.mdx | aplay -f cd\n"
     "Options:\n"
     "  -d <sec>  : limit song duration. 0 means nolimit. (default:300)\n"
+    "  -e <type> : set ym2151 emulation type, fmgen or mame. (default:fmgen)\n"
     //"  -f        : enable fadeout.\n"
     "  -l <loop> : set loop limit. (default:2)\n"
     "  -m        : measure play time as sec.\n"
@@ -241,12 +242,16 @@ int main(int argc, char **argv) {
   float max_song_duration = 300.0f;
   int loop = 2;
   int fadeout = 0;
+  char ym2151_type[8] = "fmgen";
 
   int opt;
-  while ((opt = getopt(argc, argv, "d:fl:mr:t:vV")) != -1) {
+  while ((opt = getopt(argc, argv, "d:e:fl:mr:t:vV")) != -1) {
     switch (opt) {
       case 'd':
         max_song_duration = atof(optarg);
+        break;
+      case 'e':
+        strncpy(ym2151_type, optarg, sizeof(ym2151_type));
         break;
       case 'f':
         fadeout = 1;
@@ -281,6 +286,14 @@ int main(int argc, char **argv) {
   if (mdx_name == 0 || *mdx_name == 0) {
     help();
     return 0;
+  }
+
+  if (0 == strcmp(ym2151_type, "fmgen")) {
+  } else if (0 == strcmp(ym2151_type, "mame")) {
+    MXDRVG_SetEmulationType(MXDRVG_YM2151TYPE_MAME);
+  } else {
+    fprintf(stderr, "Invalid ym2151 emulation type: %s.\n", ym2151_type);
+    return -1;
   }
 
   MXDRVG_Start(SAMPLE_RATE, filter_mode, MDX_BUF_SIZE, PDX_BUF_SIZE);
