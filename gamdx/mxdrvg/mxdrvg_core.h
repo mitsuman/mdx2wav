@@ -68,7 +68,7 @@ static void SETOPMINT(
 
 static void OPMINTFUNC(void);
 
-static OPM_Delegate *OPM = OPM_Delegate::getFmgen();
+static OPM_Delegate *OPM = OPM_Delegate::getMame();
 static X68K::X68PCM8 PCM8;
 static X68K::DOWNSAMPLE DS;
 

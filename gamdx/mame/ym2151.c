@@ -4,12 +4,24 @@
 *
 ******************************************************************************/
 
-#include "emu.h"
+//#include "emu.h"
+#include <stdio.h>
+
 #include "ym2151.h"
 
+#define M_PI 3.14159265358979323846
+#define INLINE
+
+#define logerror(...)
+
+typedef char INT8;
+typedef unsigned short UINT16;
+typedef int INT32;
+typedef unsigned int UINT32;
+typedef double attotime;
 
 /* undef this to not use MAME timer system */
-#define USE_MAME_TIMERS
+//#define USE_MAME_TIMERS
 
 /*#define FM_EMU*/
 #ifdef FM_EMU
@@ -23,7 +35,7 @@ static FILE * cymfile = NULL;
 
 
 /* struct describing a single operator */
-struct YM2151Operator
+typedef struct YM2151Operator_t
 {
 	UINT32      phase;                  /* accumulated operator phase */
 	UINT32      freq;                   /* operator frequency count */
@@ -73,10 +85,10 @@ struct YM2151Operator
 	UINT32      reserved0;              /**/
 	UINT32      reserved1;              /**/
 
-};
+} YM2151Operator;
 
 
-struct YM2151
+typedef struct YM2151_t
 {
 	signed int chanout[8];
 	signed int m2,c1,c2; /* Phase Modulation input for operators 2,3,4 */
@@ -168,7 +180,8 @@ struct YM2151
 	device_t *device;
 	unsigned int clock;                 /* chip clock in Hz (passed from 2151intf.c) */
 	unsigned int sampfreq;              /* sampling frequency in Hz (passed from 2151intf.c) */
-};
+	UINT32       volume;                /* master volume (0-16384) */
+} YM2151;
 
 
 #define FREQ_SH         16  /* 16.16 fixed point (frequency calculations) */
@@ -689,21 +702,23 @@ static void init_chip_tables(YM2151 *chip)
 	for (i=0; i<1024; i++)
 	{
 		/* ASG 980324: changed to compute both tim_A_tab and timer_A_time */
-		pom= attotime::from_hz(chip->clock) * (64 * (1024 - i));
+		//pom= attotime::from_hz(chip->clock) * (64 * (1024 - i));
+		pom = (1.0 / chip->clock) * (64 * (1024 - i));
 		#ifdef USE_MAME_TIMERS
 			chip->timer_A_time[i] = pom;
 		#else
-			chip->tim_A_tab[i] = pom.as_double() * (double)chip->sampfreq * mult;  /* number of samples that timer period takes (fixed point) */
+			chip->tim_A_tab[i] = pom * (double)chip->sampfreq * mult;  /* number of samples that timer period takes (fixed point) */
 		#endif
 	}
 	for (i=0; i<256; i++)
 	{
 		/* ASG 980324: changed to compute both tim_B_tab and timer_B_time */
-		pom= attotime::from_hz(chip->clock) * (1024 * (256 - i));
+		//pom= attotime::from_hz(chip->clock) * (1024 * (256 - i));
+		pom= (1.0 / chip->clock) * (1024 * (256 - i));
 		#ifdef USE_MAME_TIMERS
 			chip->timer_B_time[i] = pom;
 		#else
-			chip->tim_B_tab[i] = pom.as_double() * (double)chip->sampfreq * mult;  /* number of samples that timer period takes (fixed point) */
+			chip->tim_B_tab[i] = pom * (double)chip->sampfreq * mult;  /* number of samples that timer period takes (fixed point) */
 		#endif
 	}
 
@@ -1376,7 +1391,7 @@ int ym2151_read_status( void *_chip )
 
 
 //#ifdef USE_MAME_TIMERS
-#if 1 // disabled for now due to crashing with winalloc.c (ERROR_NOT_ENOUGH_MEMORY)
+#if 0 // disabled for now due to crashing with winalloc.c (ERROR_NOT_ENOUGH_MEMORY)
 /*
 *   state save support for MAME
 */
@@ -1507,7 +1522,11 @@ void * ym2151_init(device_t *device, int clock, int rate)
 {
 	YM2151 *PSG;
 
+#if defined(USE_MAME_TIMERS)
 	PSG = auto_alloc(device->machine(), YM2151);
+#else
+	PSG = malloc(sizeof(YM2151));
+#endif
 
 	memset(PSG, 0, sizeof(YM2151));
 
@@ -1540,6 +1559,7 @@ void * ym2151_init(device_t *device, int clock, int rate)
 	ym2151_reset_chip(PSG);
 	/*logerror("YM2151[init] clock=%i sampfreq=%i\n", PSG->clock, PSG->sampfreq);*/
 
+#if 0
 	if (LOG_CYM_FILE)
 	{
 		cymfile = fopen("2151_.cym","wb");
@@ -1548,7 +1568,7 @@ void * ym2151_init(device_t *device, int clock, int rate)
 		else
 			logerror("Could not create file 2151_.cym\n");
 	}
-
+#endif
 	return PSG;
 }
 
@@ -1558,7 +1578,11 @@ void ym2151_shutdown(void *_chip)
 {
 	YM2151 *chip = (YM2151 *)_chip;
 
+#if defined(USE_MAME_TIMERS)
 	auto_free (chip->device->machine(), chip);
+#else
+	free(chip);
+#endif
 
 	if (cymfile)
 		fclose (cymfile);
@@ -1642,6 +1666,17 @@ void ym2151_reset_chip(void *_chip)
 	{
 		ym2151_write_reg(chip, i, 0);
 	}
+}
+
+void ym2151_set_volume(void *_chip, int db)
+{
+	YM2151 *chip = (YM2151 *)_chip;
+    if (db > 20)
+      db = 20;
+	if (db > -192)
+		chip->volume = 16384.0 * pow(10, db / 40.0);
+	else
+		chip->volume = 0;
 }
 
 
@@ -2369,38 +2404,15 @@ INLINE signed int acc_calc(signed int value)
 /*  Generate samples for one of the YM2151's
 *
 *   'num' is the number of virtual YM2151
-*   '**buffers' is table of pointers to the buffers: left and right
+*   '*buffers' is a pointer to the buffers: left and right
 *   'length' is the number of samples that should be generated
 */
-void ym2151_update_one(void *chip, SAMP **buffers, int length)
+void ym2151_update_one(void *chip, SAMP *buffer, int length)
 {
 	YM2151 *PSG = (YM2151 *)chip;
 	signed int *chanout = PSG->chanout;
 	int i;
 	signed int outl,outr;
-	SAMP *bufL, *bufR;
-
-	bufL = buffers[0];
-	bufR = buffers[1];
-
-#ifdef USE_MAME_TIMERS
-		/* ASG 980324 - handled by real timers now */
-#else
-	if (PSG->tim_B)
-	{
-		PSG->tim_B_val -= ( length << TIMER_SH );
-		if (PSG->tim_B_val<=0)
-		{
-			PSG->tim_B_val += PSG->tim_B_tab[ PSG->timer_B_index ];
-			if ( PSG->irq_enable & 0x08 )
-			{
-				int oldstate = PSG->status & 3;
-				PSG->status |= 2;
-				if ((!oldstate) && (PSG->irqhandler)) (*PSG->irqhandler)(chip->device, 1);
-			}
-		}
-	}
-#endif
 
 	for (i=0; i<length; i++)
 	{
@@ -2455,8 +2467,8 @@ void ym2151_update_one(void *chip, SAMP **buffers, int length)
 			else if (outl < MINOUT) outl = MINOUT;
 		if (outr > MAXOUT) outr = MAXOUT;
 			else if (outr < MINOUT) outr = MINOUT;
-		((SAMP*)bufL)[i] = (SAMP)outl;
-		((SAMP*)bufR)[i] = (SAMP)outr;
+		*buffer++ = (outl * PSG->volume) >> 14;
+		*buffer++ = (outr * PSG->volume) >> 14;
 
 		SAVE_ALL_CHANNELS
 
@@ -2474,12 +2486,31 @@ void ym2151_update_one(void *chip, SAMP **buffers, int length)
 				{
 					int oldstate = PSG->status & 3;
 					PSG->status |= 1;
-					if ((!oldstate) && (PSG->irqhandler)) (*PSG->irqhandler)(chip->device, 1);
+					if ((!oldstate) && (PSG->irqhandler)) (*PSG->irqhandler)(PSG->device, 1);
 				}
 				if (PSG->irq_enable & 0x80)
 					PSG->csm_req = 2;   /* request KEY ON / KEY OFF sequence */
 			}
 		}
+#endif
+
+#ifdef USE_MAME_TIMERS
+		/* ASG 980324 - handled by real timers now */
+#else
+	if (PSG->tim_B)
+	{
+		PSG->tim_B_val -= ( 1 << TIMER_SH );
+		if (PSG->tim_B_val<=0)
+		{
+			PSG->tim_B_val += PSG->tim_B_tab[ PSG->timer_B_index ];
+			if ( PSG->irq_enable & 0x08 )
+			{
+				int oldstate = PSG->status & 3;
+				PSG->status |= 2;
+				if ((!oldstate) && (PSG->irqhandler)) (*PSG->irqhandler)(PSG->device, 1);
+			}
+		}
+	}
 #endif
 		advance(PSG);
 	}

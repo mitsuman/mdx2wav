@@ -6,6 +6,7 @@
 class OPM_Delegate {
 public:
   static OPM_Delegate *getFmgen();
+  static OPM_Delegate *getMame();
   typedef void CALLBACK(void);
 
   virtual ~OPM_Delegate() {}

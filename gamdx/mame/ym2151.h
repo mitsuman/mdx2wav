@@ -33,6 +33,10 @@
 #ifndef __YM2151_H__
 #define __YM2151_H__
 
+typedef void device_t;
+typedef short stream_sample_t;
+typedef int offs_t;
+typedef unsigned char UINT8;
 
 /* 16- and 8-bit samples (signed) are supported*/
 #define SAMPLE_BITS 16
@@ -62,14 +66,16 @@ void ym2151_shutdown(void *chip);
 /* reset all chip registers for YM2151 number 'num'*/
 void ym2151_reset_chip(void *chip);
 
+void ym2151_set_volume(void *chip, int db);
+
 /*
 ** Generate samples for one of the YM2151's
 **
 ** 'num' is the number of virtual YM2151
-** '**buffers' is table of pointers to the buffers: left and right
+** '*buffers' is a pointer to the buffers: left and right
 ** 'length' is the number of samples that should be generated
 */
-void ym2151_update_one(void *chip, SAMP **buffers, int length);
+void ym2151_update_one(void *chip, SAMP *buffers, int length);
 
 /* write 'v' to register 'r' on YM2151 chip number 'n'*/
 void ym2151_write_reg(void *chip, int r, int v);

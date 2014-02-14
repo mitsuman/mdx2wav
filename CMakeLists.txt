@@ -18,6 +18,7 @@ add_executable(mdx2wav
 	gamdx/mxdrvg/opm_delegate.cpp
 	gamdx/pcm8/pcm8.cpp
 	gamdx/pcm8/x68pcm8.cpp
+	gamdx/mame/ym2151.c
 )
 
 
