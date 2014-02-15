@@ -90,7 +90,7 @@ bool LoadMDX(const char *mdx_name, char *title, int title_len) {
         break;
       pos++;
     }
-    ptitle = 0;
+    *ptitle = 0;
   }
 
   while (pos < mdx_size) {
@@ -245,7 +245,7 @@ int main(int argc, char **argv) {
   char ym2151_type[8] = "fmgen";
 
   int opt;
-  while ((opt = getopt(argc, argv, "d:e:fl:mr:t:vV")) != -1) {
+  while ((opt = getopt(argc, argv, "d:e:fl:mr:tvV")) != -1) {
     switch (opt) {
       case 'd':
         max_song_duration = atof(optarg);
