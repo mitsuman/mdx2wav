@@ -47,8 +47,7 @@ bool read_file(const char *name, int *fsize, u8 **fdata, int offset) {
     if (verbose) {
       fprintf(stderr, "cannot fstat %s\n", name);
     }
-    close(fd);
-    return false;
+    st.st_size = 128 * 1024; // set tentative file size
   }
 
   int size = st.st_size;
@@ -59,10 +58,7 @@ bool read_file(const char *name, int *fsize, u8 **fdata, int offset) {
   }
 
   u8 *data = new u8[size + offset];
-  if (size != read(fd, data + offset, size)) {
-    fprintf(stderr, "Cannot read %s\n", name);
-    return -1;
-  }
+  size = read(fd, data + offset, size);
 
   close(fd);
 
@@ -77,6 +73,7 @@ bool LoadMDX(const char *mdx_name, char *title, int title_len) {
 
   // Load MDX file
   if (!read_file(mdx_name, &mdx_size, &mdx_buf, MAGIC_OFFSET)) {
+    fprintf(stderr, "Cannot open/read %s.\n", mdx_name);
     return false;
   }
 
