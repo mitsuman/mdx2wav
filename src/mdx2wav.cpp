@@ -68,7 +68,7 @@ bool read_file(const char *name, int *fsize, u8 **fdata, int offset) {
 }
 
 bool LoadMDX(const char *mdx_name, char *title, int title_len) {
-  u8 *mdx_buf, *pdx_buf;
+  u8 *mdx_buf = 0, *pdx_buf = 0;
   int mdx_size = 0, pdx_size = 0;
 
   // Load MDX file
@@ -106,7 +106,6 @@ bool LoadMDX(const char *mdx_name, char *title, int title_len) {
     return false;
 
   // Get mdx path.
-  bool have_pdx = false;
   if (*pdx_name) {
     char pdx_path[FILENAME_MAX];
     strncpy(pdx_path, mdx_name, sizeof(pdx_path));
@@ -141,7 +140,6 @@ bool LoadMDX(const char *mdx_name, char *title, int title_len) {
         fprintf(stderr, "try to open pdx:%s\n", pdx_path);
       }
       if (read_file(pdx_path, &pdx_size, &pdx_buf, MAGIC_OFFSET)) {
-        have_pdx = true;
         break;
       }
     }
@@ -159,8 +157,8 @@ bool LoadMDX(const char *mdx_name, char *title, int title_len) {
   u8 *mdx_head = mdx_buf + mdx_body_pos - MAGIC_OFFSET;
   mdx_head[0] = 0x00;
   mdx_head[1] = 0x00;
-  mdx_head[2] = (have_pdx ? 0 : 0xff);
-  mdx_head[3] = (have_pdx ? 0 : 0xff);
+  mdx_head[2] = (pdx_buf ? 0 : 0xff);
+  mdx_head[3] = (pdx_buf ? 0 : 0xff);
   mdx_head[4] = 0;
   mdx_head[5] = 0x0a;
   mdx_head[6] = 0x00;
