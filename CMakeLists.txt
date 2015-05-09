@@ -21,5 +21,3 @@ add_executable(mdx2wav
 	gamdx/mame/ym2151.c
 )
 
-
-

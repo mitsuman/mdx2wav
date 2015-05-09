@@ -6,7 +6,7 @@ MDX is a major sound format of Sharp X68000 in the 1990s.
 
 ## Usage
 
-mdx2wav dumps 16bit stereo 44.1kHz pcm data to stdin, so you need to use it with other commands.
+mdx2wav dumps 16bit stereo 44.1kHz pcm data to stdout, so you need to use it with other commands.
 
 To Play now,
 ```shell
