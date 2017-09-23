@@ -342,6 +342,12 @@ void MXDRVG_End(
 
 /***************************************************************/
 
+static int volatile TerminatePlay;
+static int LoopCount;
+static int LoopLimit;
+static int FadeoutStart;
+static int ReqFadeout;
+
 int MXDRVG_GetPCM(
 	SWORD *buf,
 	int len
@@ -353,6 +359,18 @@ int MXDRVG_GetPCM(
 	Sample *outerbuf = (Sample *)buf;
 
 	if (len > 1024) return (0);
+
+	int LoopCount = G.L002246;
+	if ( !FadeoutStart ) {
+		if ( LoopCount >= LoopLimit ) {
+			if ( ReqFadeout ) {
+				FadeoutStart = TRUE;
+				MXDRVG_Fadeout();
+			} else {
+				TerminatePlay = TRUE;
+			}
+		}
+	}
 
 	rest_us = (SLONG)(len*1000000)/G.SAMPRATE;
 	rest_len = len;
@@ -498,12 +516,6 @@ void volatile *MXDRVG_GetWork(
 }
 
 /***************************************************************/
-
-static int volatile TerminatePlay;
-static int LoopCount;
-static int LoopLimit;
-static int FadeoutStart;
-static int ReqFadeout;
 
 static void MXDRVG_CALLBACK MXDRVG_MeasurePlayTime_OPMINT(
 	void

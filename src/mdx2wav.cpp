@@ -212,7 +212,7 @@ void help() {
     "Options:\n"
     "  -d <sec>  : limit song duration. 0 means nolimit. (default:300)\n"
     "  -e <type> : set ym2151 emulation type, fmgen or mame. (default:fmgen)\n"
-    //"  -f        : enable fadeout.\n"
+    "  -f        : enable fadeout.\n"
     "  -l <loop> : set loop limit. (default:2)\n"
     "  -m        : measure play time as sec.\n"
     "  -r <rate> : set sampling rate. (default:44100)\n"
@@ -334,6 +334,7 @@ int main(int argc, char **argv) {
     if (len <= 0) {
       break;
     }
+
 
     fwrite(audio_buf, len, 4, stdout);
   }

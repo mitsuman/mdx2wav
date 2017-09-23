@@ -24,6 +24,7 @@ mdx2wav xxx.mdx | ffmpeg -f s16le -ar 44.1k -ac 2 -i - -ab 192 -f ogg file.ogg
 ```shell
   -d <sec>  : limit song duration. 0 means nolimit. (default:300)
   -e <type> : set ym2151 emulation type, fmgen or mame. (default:fmgen)
+  -f        : enable fadeout.
   -l <loop> : set loop limit. (default:2)
   -m        : measure play time as sec.
   -r <rate> : set sampling rate. (default:44100)
