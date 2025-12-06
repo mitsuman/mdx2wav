@@ -35,6 +35,12 @@ bool X68PCM8::Init(uint rate)
 	  OutOutInpAdpcm[0] = OutOutInpAdpcm[1] =
 	  OutOutInpAdpcm_prev[0] = OutOutInpAdpcm_prev[1] =
 	  0;
+	
+	// Visualizer用: 波形バッファの初期化
+	for (int i = 0; i < PCM8_NCH; ++i) {
+		memset(channel_waveform_[i], 0, sizeof(channel_waveform_[i]));
+		channel_waveform_pos_[i] = 0;
+	}
 
 	SetRate(rate);
 
@@ -107,9 +113,23 @@ inline void X68PCM8::pcmset62500(Sample* buffer, int ndata) {
 		for (int ch=0; ch<PCM8_NCH; ++ch) {
 			int pan = mPcm8[ch].GetMode();
 			int o = mPcm8[ch].GetPcm62();
+			
+			// Visualizer用: 各チャンネルの波形をリングバッファに記録
 			if (o != 0x80000000) {
+				// -32768<<4 ~ +32768<<4 の範囲を -32768～32767にスケール
+				int scaled_value = o >> 4;
+				if (scaled_value > 32767) scaled_value = 32767;
+				if (scaled_value < -32768) scaled_value = -32768;
+				
+				channel_waveform_[ch][channel_waveform_pos_[ch]] = (int16_t)scaled_value;
+				channel_waveform_pos_[ch] = (channel_waveform_pos_[ch] + 1) & 255;  // 256でラップアラウンド
+				
 				OutInpAdpcm[0] += (-(pan&1)) & o;
 				OutInpAdpcm[1] += (-((pan>>1)&1)) & o;
+			} else {
+				// 停止中は0を記録
+				channel_waveform_[ch][channel_waveform_pos_[ch]] = 0;
+				channel_waveform_pos_[ch] = (channel_waveform_pos_[ch] + 1) & 255;
 			}
 		}
 		OutInpAdpcm[0] = (OutInpAdpcm[0] * mVolume) >> 8;

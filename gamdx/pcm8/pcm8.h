@@ -48,11 +48,18 @@ public:
 	int Aot(void *tbl, int mode, int cnt);
 	int Lot(void *tbl, int mode);
 	int SetMode(int mode);
-	int GetRest();
-	int GetMode();
+	int GetRest() const;
+	int GetMode() const;
 
 	int GetPcm22();
 	int GetPcm62();
+	
+	// Visualizer用: 内部状態を取得
+	int GetVolume() const { return Volume; }
+	int GetAdpcmRate() const { return AdpcmRate; }
+	unsigned char* GetDmaMar() const { return const_cast<unsigned char*>(DmaMar); }
+	unsigned int GetDmaMtc() const { return DmaMtc; }
+	int GetInpPcm() const { return InpPcm; }
 
 };
 

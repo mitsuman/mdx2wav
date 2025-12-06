@@ -30,6 +30,10 @@ OPM::OPM()
 		ch[i].SetChip(&chip);
 		ch[i].SetType(typeM);
 	}
+	
+	// 波形バッファを初期化
+	memset(channel_waveform_buffer_, 0, sizeof(channel_waveform_buffer_));
+	memset(channel_waveform_pos_, 0, sizeof(channel_waveform_pos_));
 }
 
 // ---------------------------------------------------------------------------
@@ -427,40 +431,163 @@ inline uint OPM::Noise()
 //
 inline void OPM::MixSub(int activech, ISample** idest)
 {
-	if (activech & 0x4000) (*idest[0]  = ch[0].Calc());
-	if (activech & 0x1000) (*idest[1] += ch[1].Calc());
-	if (activech & 0x0400) (*idest[2] += ch[2].Calc());
-	if (activech & 0x0100) (*idest[3] += ch[3].Calc());
-	if (activech & 0x0040) (*idest[4] += ch[4].Calc());
-	if (activech & 0x0010) (*idest[5] += ch[5].Calc());
-	if (activech & 0x0004) (*idest[6] += ch[6].Calc());
+	ISample output;
+	if (activech & 0x4000) {
+		output = ch[0].Calc();
+		*idest[0] = output;
+	} else {
+		output = 0;
+	}
+	channel_waveform_buffer_[0][channel_waveform_pos_[0]] = (int16)(output > 32767 ? 32767 : (output < -32768 ? -32768 : output));
+	channel_waveform_pos_[0] = (channel_waveform_pos_[0] + 1) % CHANNEL_WAVEFORM_BUFFER_SIZE;
+	
+	if (activech & 0x1000) {
+		output = ch[1].Calc();
+		*idest[1] += output;
+	} else {
+		output = 0;
+	}
+	channel_waveform_buffer_[1][channel_waveform_pos_[1]] = (int16)(output > 32767 ? 32767 : (output < -32768 ? -32768 : output));
+	channel_waveform_pos_[1] = (channel_waveform_pos_[1] + 1) % CHANNEL_WAVEFORM_BUFFER_SIZE;
+	
+	if (activech & 0x0400) {
+		output = ch[2].Calc();
+		*idest[2] += output;
+	} else {
+		output = 0;
+	}
+	channel_waveform_buffer_[2][channel_waveform_pos_[2]] = (int16)(output > 32767 ? 32767 : (output < -32768 ? -32768 : output));
+	channel_waveform_pos_[2] = (channel_waveform_pos_[2] + 1) % CHANNEL_WAVEFORM_BUFFER_SIZE;
+	
+	if (activech & 0x0100) {
+		output = ch[3].Calc();
+		*idest[3] += output;
+	} else {
+		output = 0;
+	}
+	channel_waveform_buffer_[3][channel_waveform_pos_[3]] = (int16)(output > 32767 ? 32767 : (output < -32768 ? -32768 : output));
+	channel_waveform_pos_[3] = (channel_waveform_pos_[3] + 1) % CHANNEL_WAVEFORM_BUFFER_SIZE;
+	
+	if (activech & 0x0040) {
+		output = ch[4].Calc();
+		*idest[4] += output;
+	} else {
+		output = 0;
+	}
+	channel_waveform_buffer_[4][channel_waveform_pos_[4]] = (int16)(output > 32767 ? 32767 : (output < -32768 ? -32768 : output));
+	channel_waveform_pos_[4] = (channel_waveform_pos_[4] + 1) % CHANNEL_WAVEFORM_BUFFER_SIZE;
+	
+	if (activech & 0x0010) {
+		output = ch[5].Calc();
+		*idest[5] += output;
+	} else {
+		output = 0;
+	}
+	channel_waveform_buffer_[5][channel_waveform_pos_[5]] = (int16)(output > 32767 ? 32767 : (output < -32768 ? -32768 : output));
+	channel_waveform_pos_[5] = (channel_waveform_pos_[5] + 1) % CHANNEL_WAVEFORM_BUFFER_SIZE;
+	
+	if (activech & 0x0004) {
+		output = ch[6].Calc();
+		*idest[6] += output;
+	} else {
+		output = 0;
+	}
+	channel_waveform_buffer_[6][channel_waveform_pos_[6]] = (int16)(output > 32767 ? 32767 : (output < -32768 ? -32768 : output));
+	channel_waveform_pos_[6] = (channel_waveform_pos_[6] + 1) % CHANNEL_WAVEFORM_BUFFER_SIZE;
+	
 	if (activech & 0x0001)
 	{
 		if (noisedelta & 0x80)
-			*idest[7] += ch[7].CalcN(Noise());
+			output = ch[7].CalcN(Noise());
 		else
-			*idest[7] += ch[7].Calc();
+			output = ch[7].Calc();
+		*idest[7] += output;
+	} else {
+		output = 0;
 	}
+	channel_waveform_buffer_[7][channel_waveform_pos_[7]] = (int16)(output > 32767 ? 32767 : (output < -32768 ? -32768 : output));
+	channel_waveform_pos_[7] = (channel_waveform_pos_[7] + 1) % CHANNEL_WAVEFORM_BUFFER_SIZE;
 }
 
 inline void OPM::MixSubL(int activech, ISample** idest)
 {
-	if (activech & 0x4000) (*idest[0]  = ch[0].CalcL());
-	if (activech & 0x1000) (*idest[1] += ch[1].CalcL());
-	if (activech & 0x0400) (*idest[2] += ch[2].CalcL());
-	if (activech & 0x0100) (*idest[3] += ch[3].CalcL());
-	if (activech & 0x0040) (*idest[4] += ch[4].CalcL());
-	if (activech & 0x0010) (*idest[5] += ch[5].CalcL());
-	if (activech & 0x0004) (*idest[6] += ch[6].CalcL());
+	ISample output;
+	if (activech & 0x4000) {
+		output = ch[0].CalcL();
+		*idest[0] = output;
+	} else {
+		output = 0;
+	}
+	channel_waveform_buffer_[0][channel_waveform_pos_[0]] = (int16)(output > 32767 ? 32767 : (output < -32768 ? -32768 : output));
+	channel_waveform_pos_[0] = (channel_waveform_pos_[0] + 1) % CHANNEL_WAVEFORM_BUFFER_SIZE;
+	
+	if (activech & 0x1000) {
+		output = ch[1].CalcL();
+		*idest[1] += output;
+	} else {
+		output = 0;
+	}
+	channel_waveform_buffer_[1][channel_waveform_pos_[1]] = (int16)(output > 32767 ? 32767 : (output < -32768 ? -32768 : output));
+	channel_waveform_pos_[1] = (channel_waveform_pos_[1] + 1) % CHANNEL_WAVEFORM_BUFFER_SIZE;
+	
+	if (activech & 0x0400) {
+		output = ch[2].CalcL();
+		*idest[2] += output;
+	} else {
+		output = 0;
+	}
+	channel_waveform_buffer_[2][channel_waveform_pos_[2]] = (int16)(output > 32767 ? 32767 : (output < -32768 ? -32768 : output));
+	channel_waveform_pos_[2] = (channel_waveform_pos_[2] + 1) % CHANNEL_WAVEFORM_BUFFER_SIZE;
+	
+	if (activech & 0x0400) {
+		output = ch[3].CalcL();
+		*idest[3] += output;
+	} else {
+		output = 0;
+	}
+	channel_waveform_buffer_[3][channel_waveform_pos_[3]] = (int16)(output > 32767 ? 32767 : (output < -32768 ? -32768 : output));
+	channel_waveform_pos_[3] = (channel_waveform_pos_[3] + 1) % CHANNEL_WAVEFORM_BUFFER_SIZE;
+	
+	if (activech & 0x0040) {
+		output = ch[4].CalcL();
+		*idest[4] += output;
+	} else {
+		output = 0;
+	}
+	channel_waveform_buffer_[4][channel_waveform_pos_[4]] = (int16)(output > 32767 ? 32767 : (output < -32768 ? -32768 : output));
+	channel_waveform_pos_[4] = (channel_waveform_pos_[4] + 1) % CHANNEL_WAVEFORM_BUFFER_SIZE;
+	
+	if (activech & 0x0010) {
+		output = ch[5].CalcL();
+		*idest[5] += output;
+	} else {
+		output = 0;
+	}
+	channel_waveform_buffer_[5][channel_waveform_pos_[5]] = (int16)(output > 32767 ? 32767 : (output < -32768 ? -32768 : output));
+	channel_waveform_pos_[5] = (channel_waveform_pos_[5] + 1) % CHANNEL_WAVEFORM_BUFFER_SIZE;
+	
+	if (activech & 0x0004) {
+		output = ch[6].CalcL();
+		*idest[6] += output;
+	} else {
+		output = 0;
+	}
+	channel_waveform_buffer_[6][channel_waveform_pos_[6]] = (int16)(output > 32767 ? 32767 : (output < -32768 ? -32768 : output));
+	channel_waveform_pos_[6] = (channel_waveform_pos_[6] + 1) % CHANNEL_WAVEFORM_BUFFER_SIZE;
+	
 	if (activech & 0x0001)
 	{
 		if (noisedelta & 0x80)
-			*idest[7] += ch[7].CalcLN(Noise());
+			output = ch[7].CalcLN(Noise());
 		else
-			*idest[7] += ch[7].CalcL();
+			output = ch[7].CalcL();
+		*idest[7] += output;
+	} else {
+		output = 0;
 	}
+	channel_waveform_buffer_[7][channel_waveform_pos_[7]] = (int16)(output > 32767 ? 32767 : (output < -32768 ? -32768 : output));
+	channel_waveform_pos_[7] = (channel_waveform_pos_[7] + 1) % CHANNEL_WAVEFORM_BUFFER_SIZE;
 }
-
 
 // ---------------------------------------------------------------------------
 //	合成 (stereo)
@@ -540,6 +667,21 @@ void OPM::Mix(Sample* buffer, int nsamples)
 		}
 	}
 #undef IStoSample
+}
+
+// チャンネル波形バッファを取得
+void OPM::dbgGetChannelWaveform(int ch, int16* out, int size)
+{
+	if (ch < 0 || ch >= 8 || !out || size <= 0) return;
+	
+	int copy_size = (size < CHANNEL_WAVEFORM_BUFFER_SIZE) ? size : CHANNEL_WAVEFORM_BUFFER_SIZE;
+	int pos = channel_waveform_pos_[ch];
+	
+	// 最新のデータから古いデータへ、リングバッファとして読み出す
+	for (int i = 0; i < copy_size; i++) {
+		int idx = (pos - copy_size + i + CHANNEL_WAVEFORM_BUFFER_SIZE) % CHANNEL_WAVEFORM_BUFFER_SIZE;
+		out[i] = channel_waveform_buffer_[ch][idx];
+	}
 }
 
 }	// namespace FM

@@ -6,10 +6,15 @@
 
 //#include "emu.h"
 #include <stdio.h>
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "ym2151.h"
 
+#ifndef M_PI
 #define M_PI 3.14159265358979323846
+#endif
 #define INLINE
 
 #define logerror(...)
@@ -1374,13 +1379,13 @@ void ym2151_write_reg(void *_chip, int r, int v)
 	}
 }
 
-
+#if 0
 static TIMER_CALLBACK( cymfile_callback )
 {
 	if (cymfile)
 		fputc( (unsigned char)0, cymfile );
 }
-
+#endif
 
 int ym2151_read_status( void *_chip )
 {

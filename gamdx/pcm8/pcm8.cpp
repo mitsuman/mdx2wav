@@ -406,7 +406,7 @@ int Pcm8::SetMode(int mode) {
 }
 
 
-int Pcm8::GetRest() {
+int Pcm8::GetRest() const {
 	if (DmaMtc == 0) {
 		return 0;
 	}
@@ -421,7 +421,7 @@ int Pcm8::GetRest() {
 }
 
 
-int Pcm8::GetMode() {
+int Pcm8::GetMode() const {
 	return Mode;
 }
 

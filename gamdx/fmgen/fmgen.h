@@ -91,6 +91,12 @@ namespace FM
 		int		dbgGetIn2() { return in2_; } 
 		void	dbgStopPG() { pg_diff_ = 0; pg_diff_lfo_ = 0; }
 		
+		// EG情報取得用
+		int		dbgGetEGLevel() { return eg_level_; }
+		int		dbgGetEGPhase() { return (int)eg_phase_; }
+		int		dbgGetEGOut() { return eg_out_; }
+		bool	dbgIsKeyOn() { return keyon_; }
+		
 	private:
 		typedef uint32 Counter;
 		

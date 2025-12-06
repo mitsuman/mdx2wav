@@ -84,13 +84,18 @@ namespace FM
 		void	SetLPFCutoff(uint freq);
 		void	Reset();
 		
-		void 	SetReg(uint addr, uint data);
-		uint	GetReg(uint addr);
-		uint	ReadStatus() { return status & 0x03; }
-		
-		void 	Mix(Sample* buffer, int nsamples);
-		
-		void	SetVolume(int db);
+    void 	SetReg(uint addr, uint data);
+    uint	GetReg(uint addr);
+    uint	ReadStatus() { return status & 0x03; }
+    
+    // LFO状態の取得
+    uint	GetLFOCount() const { return lfo_count_ >> 9; }  // 0-511の範囲に正規化
+    uint8	GetLFOFreq() const { return lfofreq; }
+    uint8	GetLFOWaveform() const { return lfowaveform; }
+    uint	GetAMD() const { return amd; }
+    uint	GetPMD() const { return pmd; }
+    
+    void 	Mix(Sample* buffer, int nsamples);		void	SetVolume(int db);
 		void	SetChannelMask(uint mask);
 		
 	private:
@@ -163,6 +168,14 @@ namespace FM
 	public:
 		int		dbgGetOpOut(int c, int s) { return ch[c].op[s].dbgopout_; }
 		Channel4* dbgGetCh(int c) { return &ch[c]; }
+		
+		// チャンネル波形バッファ
+		static const int CHANNEL_WAVEFORM_BUFFER_SIZE = 256;
+		void dbgGetChannelWaveform(int ch, int16* out, int size);
+		
+	private:
+		int16 channel_waveform_buffer_[8][CHANNEL_WAVEFORM_BUFFER_SIZE];
+		int channel_waveform_pos_[8];
 
 	};
 }

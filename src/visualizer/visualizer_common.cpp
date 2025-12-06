@@ -1,0 +1,207 @@
+#include "visualizer.h"
+
+#include <SDL2/SDL.h>
+#include <SDL_ttf.h>
+#include <cstdio>
+#include <algorithm>
+
+// 汎用波形描画関数
+void Visualizer::renderChannelWaveform(int x, int y, int width, int height, 
+                                        const int16_t* waveform_data, int sample_count,
+                                        int color_r, int color_g, int color_b) {
+    // 波形の背景（暗い枠）
+    SDL_SetRenderDrawColor(renderer_, 30, 30, 40, 255);
+    SDL_Rect wave_bg = {x, y, width, height};
+    SDL_RenderFillRect(renderer_, &wave_bg);
+    SDL_SetRenderDrawColor(renderer_, 60, 60, 80, 255);
+    SDL_RenderDrawRect(renderer_, &wave_bg);
+    
+    // 中央線（ゼロライン）
+    int center_y = y + height / 2;
+    SDL_SetRenderDrawColor(renderer_, 80, 80, 100, 128);
+    SDL_RenderDrawLine(renderer_, x, center_y, x + width, center_y);
+    
+    // 波形を描画（1サンプル = 1ピクセル）
+    if (waveform_data && sample_count > 0) {
+        SDL_SetRenderDrawColor(renderer_, color_r, color_g, color_b, 255);
+        int samples_to_draw = std::min(width, sample_count);
+        for (int i = 0; i < samples_to_draw - 1; i++) {
+            // 直接サンプルを使用（ダウンサンプリングなし）
+            int y1 = center_y - (waveform_data[i] * height / 2 / 32768);
+            int y2 = center_y - (waveform_data[i + 1] * height / 2 / 32768);
+            
+            SDL_RenderDrawLine(renderer_, x + i, y1, x + i + 1, y2);
+        }
+    }
+}
+
+// 7セグメント表示
+//   a
+//  f b
+//   g
+//  e c
+//   d
+void Visualizer::draw7Segment(int x, int y, int digit, int r, int g, int b, int seg_width, int seg_height) {
+    // 各数字のセグメント点灯パターン (a,b,c,d,e,f,g)
+    static const bool segments[10][7] = {
+        {1,1,1,1,1,1,0}, // 0
+        {0,1,1,0,0,0,0}, // 1
+        {1,1,0,1,1,0,1}, // 2
+        {1,1,1,1,0,0,1}, // 3
+        {0,1,1,0,0,1,1}, // 4
+        {1,0,1,1,0,1,1}, // 5
+        {1,0,1,1,1,1,1}, // 6
+        {1,1,1,0,0,0,0}, // 7
+        {1,1,1,1,1,1,1}, // 8
+        {1,1,1,1,0,1,1}  // 9
+    };
+    
+    if (digit < 0 || digit > 9) return;
+    
+    int seg_thick = 2;  // セグメントの太さ
+    int gap = 1;  // セグメント間の隙間
+    
+    // オフ時の暗い色
+    int off_r = r / 8;
+    int off_g = g / 8;
+    int off_b = b / 8;
+    
+    // セグメントa (上横)
+    SDL_SetRenderDrawColor(renderer_, 
+        segments[digit][0] ? r : off_r,
+        segments[digit][0] ? g : off_g,
+        segments[digit][0] ? b : off_b, 255);
+    SDL_Rect seg_a = {x + gap, y, seg_width - gap * 2, seg_thick};
+    SDL_RenderFillRect(renderer_, &seg_a);
+    
+    // セグメントb (右上縦)
+    SDL_SetRenderDrawColor(renderer_,
+        segments[digit][1] ? r : off_r,
+        segments[digit][1] ? g : off_g,
+        segments[digit][1] ? b : off_b, 255);
+    SDL_Rect seg_b = {x + seg_width - seg_thick, y + gap, seg_thick, seg_height - gap};
+    SDL_RenderFillRect(renderer_, &seg_b);
+    
+    // セグメントc (右下縦)
+    SDL_SetRenderDrawColor(renderer_,
+        segments[digit][2] ? r : off_r,
+        segments[digit][2] ? g : off_g,
+        segments[digit][2] ? b : off_b, 255);
+    SDL_Rect seg_c = {x + seg_width - seg_thick, y + seg_height + gap, seg_thick, seg_height - gap};
+    SDL_RenderFillRect(renderer_, &seg_c);
+    
+    // セグメントd (下横)
+    SDL_SetRenderDrawColor(renderer_,
+        segments[digit][3] ? r : off_r,
+        segments[digit][3] ? g : off_g,
+        segments[digit][3] ? b : off_b, 255);
+    SDL_Rect seg_d = {x + gap, y + seg_height * 2, seg_width - gap * 2, seg_thick};
+    SDL_RenderFillRect(renderer_, &seg_d);
+    
+    // セグメントe (左下縦)
+    SDL_SetRenderDrawColor(renderer_,
+        segments[digit][4] ? r : off_r,
+        segments[digit][4] ? g : off_g,
+        segments[digit][4] ? b : off_b, 255);
+    SDL_Rect seg_e = {x, y + seg_height + gap, seg_thick, seg_height - gap};
+    SDL_RenderFillRect(renderer_, &seg_e);
+    
+    // セグメントf (左上縦)
+    SDL_SetRenderDrawColor(renderer_,
+        segments[digit][5] ? r : off_r,
+        segments[digit][5] ? g : off_g,
+        segments[digit][5] ? b : off_b, 255);
+    SDL_Rect seg_f = {x, y + gap, seg_thick, seg_height - gap};
+    SDL_RenderFillRect(renderer_, &seg_f);
+    
+    // セグメントg (中央横)
+    SDL_SetRenderDrawColor(renderer_,
+        segments[digit][6] ? r : off_r,
+        segments[digit][6] ? g : off_g,
+        segments[digit][6] ? b : off_b, 255);
+    SDL_Rect seg_g = {x + gap, y + seg_height, seg_width - gap * 2, seg_thick};
+    SDL_RenderFillRect(renderer_, &seg_g);
+}
+
+// チャンネル色を取得（アルゴリズムベース）
+void Visualizer::getChannelColor(int ch, int& r, int& g, int& b) {
+    // アルゴリズム番号で異なる色を割り当て（青紫系）
+    static const int colors[8][3] = {
+        {100, 150, 255},  // ALG0: 明るい青
+        {150, 100, 255},  // ALG1: 青紫
+        {100, 200, 255},  // ALG2: シアン青
+        {200, 150, 255},  // ALG3: ライラック
+        {120, 180, 255},  // ALG4: スカイブルー
+        {180, 120, 255},  // ALG5: 薄紫
+        {100, 220, 200},  // ALG6: ターコイズ
+        {160, 160, 255},  // ALG7: ペリウィンクル
+    };
+    
+    if (ch >= 0 && ch < 8) {
+        r = colors[ch][0];
+        g = colors[ch][1];
+        b = colors[ch][2];
+    } else {
+        r = g = b = 128;
+    }
+}
+
+// EGフェーズの色を取得
+void Visualizer::getEGPhaseColor(int phase, int& r, int& g, int& b) {
+    // EGフェーズごとの色
+    switch (phase) {
+        case 1: // attack
+            r = 100; g = 255; b = 100; // 緑
+            break;
+        case 2: // decay
+            r = 255; g = 200; b = 100; // オレンジ
+            break;
+        case 3: // sustain
+            r = 100; g = 180; b = 255; // 青
+            break;
+        case 4: // release
+            r = 200; g = 100; b = 200; // 紫
+            break;
+        default: // off or next
+            r = 60; g = 60; b = 80; // 暗い
+            break;
+    }
+}
+
+// ノート名を取得
+const char* Visualizer::getNoteName(int note) {
+    static const char* note_names[] = {
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
+    };
+    return note_names[note % 12];
+}
+
+// TTFフォントでテキストを描画
+void renderText(SDL_Renderer* renderer, void* font_ptr, const char* text, 
+                int x, int y, int r, int g, int b) {
+    TTF_Font* font = (TTF_Font*)font_ptr;
+    if (!font || !text) return;
+    
+    // 太字スタイルを設定（デジタル/LED風）
+    TTF_SetFontStyle(font, TTF_STYLE_BOLD);
+    
+    // テキストを描画
+    SDL_Color color = {(Uint8)r, (Uint8)g, (Uint8)b, 255};
+    SDL_Surface* surface = TTF_RenderText_Blended(font, text, color);
+    if (!surface) {
+        TTF_SetFontStyle(font, TTF_STYLE_NORMAL);
+        return;
+    }
+    
+    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
+    if (texture) {
+        SDL_Rect dst = {x, y, surface->w, surface->h};
+        SDL_RenderCopy(renderer, texture, nullptr, &dst);
+        SDL_DestroyTexture(texture);
+    }
+    
+    SDL_FreeSurface(surface);
+    
+    // スタイルを戻す
+    TTF_SetFontStyle(font, TTF_STYLE_NORMAL);
+}

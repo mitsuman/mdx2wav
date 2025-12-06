@@ -18,6 +18,7 @@ protected:
 
   virtual bool Count(int32 us) {
     OPM.Count(us);
+    return true;
   }
 
   virtual int32 GetNextEvent() {
@@ -26,6 +27,7 @@ protected:
 
   virtual bool Init(uint c, uint r, bool f) {
     OPM.Init(c, r, f);
+    return true;
   }
 
   virtual void SetReg(uint addr, uint data) {
@@ -50,6 +52,10 @@ protected:
 
   virtual void SetIrqCallback(CALLBACK *cb) {
     OPM.callback = cb;
+  }
+  
+  virtual void* GetOPMPointer() {
+    return static_cast<void*>(&OPM);
   }
 
 private:

@@ -19,22 +19,33 @@ namespace X68K
 		X68PCM8();
 		~X68PCM8() {}
 
-		bool Init(uint rate);
-		bool SetRate(uint rate);
-		void Reset();
+		virtual bool Init(uint rate);
+		virtual bool SetRate(uint rate);
+		virtual void Reset();
 
-		int Out(int ch, void *adrs, int mode, int len);
-		void Abort();
+		virtual int Out(int ch, void *adrs, int mode, int len);
+		virtual void Abort();
 
-		void Mix(Sample *buffer, int nsamples);
-		void SetVolume(int db);
-		void SetChannelMask(uint mask);
+	virtual void Mix(Sample *buffer, int nsamples);
+	virtual void SetVolume(int db);
+	virtual void SetChannelMask(uint mask);
+	
+	// Visualizer用: Pcm8チャンネルへのアクセス
+	const Pcm8& GetPcm8Channel(int ch) const { return mPcm8[ch & (PCM8_NCH - 1)]; }
+	
+	// Visualizer用: チャンネルごとの波形バッファを取得
+	const int16_t* GetChannelWaveform(int ch) const { return channel_waveform_[ch & (PCM8_NCH - 1)]; }
+	int GetChannelWaveformPos(int ch) const { return channel_waveform_pos_[ch & (PCM8_NCH - 1)]; }
 
-	private:
-		Pcm8 mPcm8[PCM8_NCH];
+protected:
+	Pcm8 mPcm8[PCM8_NCH];
 		uint mMask;
 		int mVolume;
 		int mSampleRate;
+		
+		// Visualizer用: 各チャンネルの波形リングバッファ (256サンプル)
+		int16_t channel_waveform_[PCM8_NCH][256];
+		int channel_waveform_pos_[PCM8_NCH];
 
 		sint32 OutInpAdpcm[2];
 		sint32 OutInpAdpcm_prev[2];

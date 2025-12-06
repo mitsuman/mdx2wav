@@ -152,6 +152,43 @@ void MXDRVG_SetEmulationType(
 	int ym2151type
 );
 
+// Visualizer support: Get/Set OPM_Delegate
+class OPM_Delegate;
+
+MXDRVG_EXPORT
+OPM_Delegate* MXDRVG_GetOPMDelegate(
+	void
+);
+
+MXDRVG_EXPORT
+void MXDRVG_SetOPMDelegate(
+	OPM_Delegate* delegate
+);
+
+// Visualizer support: Get/Set PCM8
+namespace X68K { class X68PCM8; }
+
+MXDRVG_EXPORT
+X68K::X68PCM8* MXDRVG_GetPCM8(
+	void
+);
+
+MXDRVG_EXPORT
+void MXDRVG_SetPCM8(
+	X68K::X68PCM8* pcm8
+);
+
+// Visualizer support: Get ADPCM buffer info
+MXDRVG_EXPORT
+void* MXDRVG_GetADPCMBuffer(
+	void
+);
+
+MXDRVG_EXPORT
+unsigned int MXDRVG_GetADPCMBufferSize(
+	void
+);
+
 MXDRVG_EXPORT
 int MXDRVG_Start(
 	int samprate,

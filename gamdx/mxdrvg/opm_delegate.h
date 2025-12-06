@@ -26,6 +26,9 @@ public:
   virtual void SetVolume(int db) = 0;
   //virtual void SetChannelMask(uint mask) = 0;
   virtual void SetIrqCallback(CALLBACK *callback) = 0;
+  
+  // Visualizer用: 実際のOPMポインタを取得（fmgenの場合のみ）
+  virtual void* GetOPMPointer() { return nullptr; }
 };
 
 #endif

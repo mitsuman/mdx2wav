@@ -69,7 +69,8 @@ static void SETOPMINT(
 static void OPMINTFUNC(void);
 
 static OPM_Delegate *OPM = OPM_Delegate::getFmgen();
-static X68K::X68PCM8 PCM8;
+static X68K::X68PCM8 PCM8_DEFAULT;
+static X68K::X68PCM8 *PCM8 = &PCM8_DEFAULT;
 static X68K::DOWNSAMPLE DS;
 
 /***************************************************************/
@@ -294,11 +295,12 @@ int MXDRVG_Start(
 
 	OPM->Init(4000000, G.INNERSAMPRATE, (G.OPMFILTER != 0));
 	OPM->SetIrqCallback(OPMINTFUNC);
-	PCM8.Init(G.INNERSAMPRATE);
+	printf("PCM8 %p\n", PCM8);
+	PCM8->Init(G.INNERSAMPRATE);
 	DS.Init(G.INNERSAMPRATE, G.SAMPRATE, ((filtermode&1) == 0));
 
 	OPM->SetVolume(-12);
-	PCM8.SetVolume(0);
+	PCM8->SetVolume(0);
 
 	ret = Initialize( mdxbufsize, pdxbufsize );
 	if ( ret != 0 ) {
@@ -397,7 +399,7 @@ int MXDRVG_GetPCM(
 		if (innerbuf) {
 			memset(innerbuf, 0, create_len2*sizeof(Sample)*2);
 			OPM->Mix(innerbuf, create_len2);
-			PCM8.Mix(innerbuf, create_len2);
+			PCM8->Mix(innerbuf, create_len2);
 			if (TotalVolume != 256) {
 				for (ULONG j=0; j<create_len2; j++) {
 					int v0 = (innerbuf[j*2+0] * TotalVolume) >> 8;
@@ -660,15 +662,15 @@ static void PCM8_SUB(
 
 	switch ( D0&0xfff0 ) {
 	  case 0x0000:
-		PCM8.Out(D0&0xff, (void *)A1, D1, D2);
+		PCM8->Out(D0&0xff, (void *)A1, D1, D2);
 		break;
 	  case 0x0100:
 		switch ( D0&0xffff ) {
 		  case 0x0100:
-			PCM8.Out(D0&0xff, 0, 0, 0);
+			PCM8->Out(D0&0xff, 0, 0, 0);
 			break;
 		  case 0x0101:
-			PCM8.Abort();
+			PCM8->Abort();
 			break;
 		}
 		break;
@@ -711,19 +713,19 @@ static void OPM_SUB(
 static void ADPCMOUT(
 	void
 ) {
-	PCM8.Out(0, (void *)A1, D1+0x00ff0000, D2);
+	PCM8->Out(0, (void *)A1, D1+0x00ff0000, D2);
 }
 
 static void ADPCMMOD_STOP(
 	void
 ) {
-	PCM8.Out(0, (void *)0, 0, 0);
+	PCM8->Out(0, (void *)0, 0, 0);
 }
 
 static void ADPCMMOD_END(
 	void
 ) {
-	PCM8.Reset();
+	PCM8->Reset();
 }
 
 /***************************************************************/
