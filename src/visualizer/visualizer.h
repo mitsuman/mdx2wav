@@ -15,6 +15,7 @@ class VideoEncoder;
 // Layout constants
 static const int YM2151_START_Y = 73;  // YM2151チャンネル表示の開始Y座標（タイトル+Timer情報分のスペース）
 static const int YM2151_LINE_HEIGHT = 70;  // 各チャンネルの高さ
+static const int ADPCM_LINE_HEIGHT = 45;   // ADPCMチャンネル表示の高さ
 static const int KEYBOARD_START_X = 240;
 static const int WHITE_KEY_WIDTH = 10;
 static const int OCTAVE_COUNT = 58;  // 表示する白鍵の数 (C0-C8 = 57-58 keys)
@@ -226,6 +227,10 @@ private:
     void renderKeyboard();
     void renderWaveform();
     void renderSpectrum();  // スペクトラムアナライザ描画
+    void renderSpectrumSection(int x, int y, int width, int height,
+                               SpectrumAnalyzer* analyzer,
+                               int channel_index,
+                               bool write_debug);
     void renderAlgorithmDiagram(int x, int y, int algorithm, const YM2151State::Channel& channel);
     void renderLFOWaveform(int x, int y, int waveform, int r, int g, int b);
     void draw7Segment(int x, int y, int digit, int r, int g, int b, int seg_width, int seg_height);
@@ -241,7 +246,7 @@ private:
     bool has_prev_waveform_[MAX_CHANNELS];
     
     // スペクトラムアナライザ（チャンネルごと）
-    static const int NUM_SPECTRUM_ANALYZERS = 9;  // YM2151(8) + ADPCM(1)
+    static const int NUM_SPECTRUM_ANALYZERS = 16;  // YM2151(8) + ADPCM(8)
     SpectrumAnalyzer* spectrum_analyzers_[NUM_SPECTRUM_ANALYZERS];
     
     // スペクトラムデバッグ

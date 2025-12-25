@@ -20,6 +20,8 @@
 
 // 波形表示用のバッファサイズ
 static const int WAVEFORM_BUFFER_SIZE = 2048;
+static const int SPECTRUM_BAR_WIDTH = 3;
+static const int SPECTRUM_BAR_SPACING = 1;
 
 // 内部実装用の構造体
 struct VisualizerImpl {
@@ -102,40 +104,27 @@ Visualizer::Visualizer()
         prev_waveform_offset_[i] = 0;
         has_prev_waveform_[i] = false;
     }
-    
-    // ADPCMピーク情報の初期化
-    for (int i = 0; i < 8; i++) {
-        adpcm_peaks_[i].peak_volume = 0;
-        adpcm_peaks_[i].keyon_time = 0;
-        adpcm_peaks_[i].last_length = 0;
-        adpcm_peaks_[i].start_address = 0;
-        adpcm_peaks_[i].end_address = 0;
-    }
 }
 
 Visualizer::~Visualizer() {
     shutdown();
 }
 
-// 共通の初期化処理（TTF、フォント読み込み）
 bool Visualizer::initCommon() {
-    // TTF初期化
-    if (TTF_Init() < 0) {
+    if (TTF_Init() == -1) {
         fprintf(stderr, "TTF_Init failed: %s\n", TTF_GetError());
         return false;
     }
-    
-    // データディレクトリのピクセルフォントを優先的に使用
+
     const char* font_paths[] = {
-        "data/8-bit-6x6-nostalgia.otf",
-        "../data/8-bit-6x6-nostalgia.otf",
         "data/6x6-pixel-font.otf",
         "../data/6x6-pixel-font.otf",
-        "/System/Library/Fonts/Courier.ttc",
-        "/System/Library/Fonts/Monaco.ttc",
+        "data/8-bit-6x6-nostalgia.otf",
+        "../data/8-bit-6x6-nostalgia.otf",
+        "/System/Library/Fonts/Supplemental/Menlo.ttc",
+        "/System/Library/Fonts/Supplemental/Courier New.ttf",
         nullptr
     };
-    
     const char* font_path = nullptr;
     for (int i = 0; font_paths[i] != nullptr; i++) {
         FILE* f = fopen(font_paths[i], "r");
@@ -441,9 +430,24 @@ void Visualizer::updateWaveform(const short* samples, int count) {
         }
     }
     
-    // ADPCM用（ミックスされたオーディオを使用）
-    if (spectrum_analyzers_[8]) {
-        spectrum_analyzers_[8]->processAudio(samples, count);
+    // ADPCM用（各チャンネルの波形を個別に解析）
+    if (state_) {
+        YM2151State::ADPCMChannel adpcm_channels[8];
+        state_->getAllADPCMChannels(adpcm_channels);
+        const int waveform_samples = sizeof(adpcm_channels[0].waveform) / sizeof(int16_t);
+        int16_t channel_waveform_stereo[waveform_samples * 2];
+        for (int ch = 0; ch < 8; ch++) {
+            SpectrumAnalyzer* analyzer = spectrum_analyzers_[8 + ch];
+            if (!analyzer) {
+                continue;
+            }
+            for (int i = 0; i < waveform_samples; i++) {
+                int16_t sample = adpcm_channels[ch].waveform[i];
+                channel_waveform_stereo[i * 2] = sample;
+                channel_waveform_stereo[i * 2 + 1] = sample;
+            }
+            analyzer->processAudio(channel_waveform_stereo, waveform_samples);
+        }
     }
     
     // サンプルをダウンサンプリングして波形バッファに格納
@@ -2688,13 +2692,60 @@ bool Visualizer::loadChannelPreset(int preset_num) {
     return true;
 }
 
+void Visualizer::renderSpectrumSection(int x, int y, int width, int height,
+                                       SpectrumAnalyzer* analyzer,
+                                       int channel_index,
+                                       bool write_debug) {
+    if (!analyzer) {
+        return;
+    }
+
+    SDL_Rect bg = {x, y, width, height};
+    SDL_SetRenderDrawColor(renderer_, 30, 30, 30, 255);
+    SDL_RenderFillRect(renderer_, &bg);
+
+    bool output_debug = write_debug && spectrum_debug_file_ && channel_index >= 0;
+    if (output_debug) {
+        fprintf(spectrum_debug_file_, "CH%d: ", channel_index);
+        for (int bar = 0; bar < 10; bar++) {
+            float magnitude = analyzer->getMagnitude(bar);
+            fprintf(spectrum_debug_file_, "[%d]=%.4f ", bar, magnitude);
+        }
+        fprintf(spectrum_debug_file_, "\n");
+    }
+
+    int num_bars = SpectrumAnalyzer::NUM_BARS;
+    int total_bar_width = (SPECTRUM_BAR_WIDTH + SPECTRUM_BAR_SPACING) * num_bars - SPECTRUM_BAR_SPACING;
+    int start_x = x + (width - total_bar_width) / 2;
+
+    for (int bar = 0; bar < num_bars; bar++) {
+        float magnitude = analyzer->getMagnitude(bar);
+        int bar_height = (int)(magnitude * (height - 4));
+        if (bar_height <= 0) {
+            continue;
+        }
+
+        int bar_x = start_x + bar * (SPECTRUM_BAR_WIDTH + SPECTRUM_BAR_SPACING);
+        int bar_y = y + height - bar_height - 2;
+
+        int r = 140;
+        int g = 200;
+        int b = 255;
+
+        SDL_SetRenderDrawColor(renderer_, r, g, b, 255);
+        SDL_Rect bar_rect = {bar_x, bar_y, SPECTRUM_BAR_WIDTH, bar_height};
+        SDL_RenderFillRect(renderer_, &bar_rect);
+    }
+
+    SDL_SetRenderDrawColor(renderer_, 100, 100, 100, 255);
+    SDL_RenderDrawRect(renderer_, &bg);
+}
+
 // スペクトラムアナライザの描画
 void Visualizer::renderSpectrum() {
     const int SPECTRUM_X = 1100;  // 元のウィンドウ右端から開始
     const int SPECTRUM_WIDTH = 300;
     const int SPECTRUM_START_Y = YM2151_START_Y;
-    const int BAR_WIDTH = 3;  // 4から3に減らす
-    const int BAR_SPACING = 1;
     
     // デバッグ出力（最初の10フレームのみ）
     bool do_debug = spectrum_debug_file_ && spectrum_debug_frame_count_ < 180;  // 3秒分（60fps想定）
@@ -2707,110 +2758,23 @@ void Visualizer::renderSpectrum() {
         int y = SPECTRUM_START_Y + ch * YM2151_LINE_HEIGHT;
         int spectrum_height = YM2151_LINE_HEIGHT - 10;
         
-        // 背景（暗い枠）
-        SDL_SetRenderDrawColor(renderer_, 30, 30, 30, 255);
-        SDL_Rect bg = {SPECTRUM_X, y, SPECTRUM_WIDTH, spectrum_height};
-        SDL_RenderFillRect(renderer_, &bg);
-        
-        // スペクトラムバーを描画（チャンネルごとのアナライザを使用）
-        SpectrumAnalyzer* analyzer = spectrum_analyzers_[ch];
-        if (analyzer) {
-            // デバッグ出力：各チャンネルの最初の10バーのデータを出力
-            if (do_debug) {
-                fprintf(spectrum_debug_file_, "CH%d: ", ch);
-                for (int bar = 0; bar < 10; bar++) {
-                    float magnitude = analyzer->getMagnitude(bar);
-                    fprintf(spectrum_debug_file_, "[%d]=%.4f ", bar, magnitude);
-                }
-                fprintf(spectrum_debug_file_, "\n");
-            }
-            
-            int num_bars = SpectrumAnalyzer::NUM_BARS;
-            int total_bar_width = (BAR_WIDTH + BAR_SPACING) * num_bars - BAR_SPACING;
-            int start_x = SPECTRUM_X + (SPECTRUM_WIDTH - total_bar_width) / 2;
-            
-            for (int bar = 0; bar < num_bars; bar++) {
-                float magnitude = analyzer->getMagnitude(bar);
-                int bar_height = (int)(magnitude * (spectrum_height - 4));
-            
-                if (bar_height > 0) {
-                    int bar_x = start_x + bar * (BAR_WIDTH + BAR_SPACING);
-                    int bar_y = y + spectrum_height - bar_height - 2;
-                    
-                    // 周波数に応じて色を変える（低音:赤 → 中音:緑 → 高音:青）
-                    int r, g, b;
-                    if (bar < num_bars / 3) {
-                        // 低音域: 赤→黄
-                        float t = (float)bar / (num_bars / 3);
-                        r = 255;
-                        g = (int)(255 * t);
-                        b = 0;
-                    } else if (bar < 2 * num_bars / 3) {
-                        // 中音域: 黄→緑
-                        float t = (float)(bar - num_bars / 3) / (num_bars / 3);
-                        r = (int)(255 * (1.0f - t));
-                        g = 255;
-                        b = 0;
-                    } else {
-                        // 高音域: 緑→青
-                        float t = (float)(bar - 2 * num_bars / 3) / (num_bars / 3);
-                        r = 0;
-                        g = (int)(255 * (1.0f - t));
-                        b = 255;
-                    }
-                    
-                    SDL_SetRenderDrawColor(renderer_, r, g, b, 255);
-                    SDL_Rect bar_rect = {bar_x, bar_y, BAR_WIDTH, bar_height};
-                    SDL_RenderFillRect(renderer_, &bar_rect);
-                }
-            }
-        
-            // 枠線
-            SDL_SetRenderDrawColor(renderer_, 100, 100, 100, 255);
-            SDL_RenderDrawRect(renderer_, &bg);
-        }  // if (analyzer)
+        renderSpectrumSection(SPECTRUM_X, y, SPECTRUM_WIDTH, spectrum_height,
+                      spectrum_analyzers_[ch], ch, do_debug);
     }  // for each YM2151 channel
-    
-    // フレームカウンタを増やす
-    if (do_debug) {
-        spectrum_debug_frame_count_++;
-    }
     
     // ADPCMチャンネル用のスペクトラム
     if (adpcm_display_channels_ > 0) {
-        int adpcm_y = SPECTRUM_START_Y + ym2151_display_channels_ * YM2151_LINE_HEIGHT;
-        int spectrum_height = YM2151_LINE_HEIGHT - 10;
-        
-        // 背景
-        SDL_SetRenderDrawColor(renderer_, 30, 30, 30, 255);
-        SDL_Rect bg = {SPECTRUM_X, adpcm_y, SPECTRUM_WIDTH, spectrum_height};
-        SDL_RenderFillRect(renderer_, &bg);
-        
-        // スペクトラムバー（ADPCM用アナライザを使用）
-        SpectrumAnalyzer* analyzer = spectrum_analyzers_[8];  // Index 8 is for ADPCM
-        if (analyzer) {
-            int num_bars = SpectrumAnalyzer::NUM_BARS;
-            int total_bar_width = (BAR_WIDTH + BAR_SPACING) * num_bars - BAR_SPACING;
-            int start_x = SPECTRUM_X + (SPECTRUM_WIDTH - total_bar_width) / 2;
-            
-            for (int bar = 0; bar < num_bars; bar++) {
-                float magnitude = analyzer->getMagnitude(bar);
-                int bar_height = (int)(magnitude * (spectrum_height - 4));
-                
-                if (bar_height > 0) {
-                    int bar_x = start_x + bar * (BAR_WIDTH + BAR_SPACING);
-                    int bar_y = adpcm_y + spectrum_height - bar_height - 2;
-                    
-                    // ADPCM用の色（オレンジ系）
-                    SDL_SetRenderDrawColor(renderer_, 255, 140, 0, 255);
-                    SDL_Rect bar_rect = {bar_x, bar_y, BAR_WIDTH, bar_height};
-                    SDL_RenderFillRect(renderer_, &bar_rect);
-                }
-            }
+        int adpcm_start_y = SPECTRUM_START_Y + ym2151_display_channels_ * YM2151_LINE_HEIGHT;
+        for (int ch = 0; ch < adpcm_display_channels_ && ch < 8; ch++) {
+            int y = adpcm_start_y + ch * ADPCM_LINE_HEIGHT;
+            int spectrum_height = ADPCM_LINE_HEIGHT - 5;
+            renderSpectrumSection(SPECTRUM_X, y, SPECTRUM_WIDTH, spectrum_height,
+                                  spectrum_analyzers_[8 + ch], 8 + ch, do_debug);
         }
-        
-        // 枠線
-        SDL_SetRenderDrawColor(renderer_, 100, 100, 100, 255);
-        SDL_RenderDrawRect(renderer_, &bg);
+    }
+
+    // フレームカウンタを増やす
+    if (do_debug) {
+        spectrum_debug_frame_count_++;
     }
 }

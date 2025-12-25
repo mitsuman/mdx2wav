@@ -14,7 +14,7 @@ void Visualizer::renderADPCMChannels(int& y) {
     YM2151State::ADPCMChannel adpcm_channels[8];
     state_->getAllADPCMChannels(adpcm_channels);
     
-    int adpcm_line_height = 45;  // ADPCMは縦に詰める
+    const int adpcm_line_height = ADPCM_LINE_HEIGHT;  // ADPCMは縦に詰める
     
     // ADPCMチャンネル (8-15) - 表示チャンネル数分だけ表示
     for (int ch = 8; ch < 8 + adpcm_display_channels_; ch++) {
