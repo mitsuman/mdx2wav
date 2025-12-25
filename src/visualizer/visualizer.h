@@ -2,6 +2,8 @@
 #define VISUALIZER_H
 
 #include "ym2151_state.h"
+#include "spectrum_analyzer.h"
+#include <cstdio>
 
 // 前方宣言
 struct SDL_Window;
@@ -113,6 +115,9 @@ public:
         adpcm_waveform_scale_ = (adpcm_scale > 0.0f && adpcm_scale <= 10.0f) ? adpcm_scale : 1.0f;
     }
     
+    // スペクトラムデバッグモードの設定
+    void setSpectrumDebug(const char* filename);
+    
     // キーボード/MIDI演奏
     void triggerNote(int midi_note, bool key_on, int velocity = 127);
 
@@ -220,6 +225,7 @@ private:
     void renderADPCMChannels(int& y);
     void renderKeyboard();
     void renderWaveform();
+    void renderSpectrum();  // スペクトラムアナライザ描画
     void renderAlgorithmDiagram(int x, int y, int algorithm, const YM2151State::Channel& channel);
     void renderLFOWaveform(int x, int y, int waveform, int r, int g, int b);
     void draw7Segment(int x, int y, int digit, int r, int g, int b, int seg_width, int seg_height);
@@ -233,6 +239,14 @@ private:
     int16_t prev_waveform_[MAX_CHANNELS][200];
     int prev_waveform_offset_[MAX_CHANNELS];
     bool has_prev_waveform_[MAX_CHANNELS];
+    
+    // スペクトラムアナライザ（チャンネルごと）
+    static const int NUM_SPECTRUM_ANALYZERS = 9;  // YM2151(8) + ADPCM(1)
+    SpectrumAnalyzer* spectrum_analyzers_[NUM_SPECTRUM_ANALYZERS];
+    
+    // スペクトラムデバッグ
+    FILE* spectrum_debug_file_;
+    int spectrum_debug_frame_count_;
     
     // 初期化/クリーンアップヘルパー
     bool initCommon();       // TTF、フォント読み込みなど共通の初期化

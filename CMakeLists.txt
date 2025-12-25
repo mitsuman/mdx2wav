@@ -46,6 +46,7 @@ if(ENABLE_VISUALIZER)
 		src/visualizer/visualizer_adpcm.cpp
 		src/visualizer/ym2151_state.cpp
 		src/visualizer/video_encoder.cpp
+		src/visualizer/spectrum_analyzer.cpp
 		gamdx/mxdrvg/opm_visualizer.cpp
 		gamdx/mxdrvg/pcm8_visualizer.cpp
 	)

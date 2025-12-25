@@ -19,6 +19,11 @@ typedef struct {
   bool terminated;
   pthread_mutex_t mutex;
   pthread_cond_t cond;
+  
+  // For visualizer: shared audio buffer
+  short *shared_buffer;
+  int shared_buffer_len;
+  pthread_mutex_t buffer_mutex;
 } AudioContext;
 
 bool initAudioQueue(AudioContext *ctx, int sample_rate, int buffer_samples);

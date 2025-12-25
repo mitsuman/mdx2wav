@@ -340,6 +340,7 @@ int main(int argc, char **argv) {
   float ym2151_waveform_scale = 1.0f;
   float adpcm_waveform_scale = 1.0f;
   const char* screenshot_filename = nullptr;
+  const char* spectrum_debug_filename = nullptr;
   const char* video_filename = nullptr;
   int video_fps = 60;
   int ym2151_channels = 8;
@@ -504,6 +505,20 @@ int main(int argc, char **argv) {
       fprintf(stderr, "Visualizer support is not enabled.\n");
       return -1;
 #endif
+    } else if (strcmp(argv[i], "--spectrum-debug") == 0 && i + 1 < argc) {
+#ifdef ENABLE_VISUALIZER
+      spectrum_debug_filename = argv[i + 1];
+      // Remove these args from argv
+      for (int j = i; j < argc - 2; j++) {
+        argv[j] = argv[j + 2];
+      }
+      argc -= 2;
+      i--;
+      enable_visualizer = true;
+#else
+      fprintf(stderr, "Visualizer support is not enabled.\n");
+      return -1;
+#endif
     }
   }
   
@@ -654,7 +669,7 @@ int main(int argc, char **argv) {
     
     if (video_filename) {
       // 動画録画モード
-      init_success = visualizer->initVideoMode(video_filename, 1100, window_height, video_fps, SAMPLE_RATE);
+      init_success = visualizer->initVideoMode(video_filename, 1400, window_height, video_fps, SAMPLE_RATE);
       if (!init_success) {
         fprintf(stderr, "Failed to initialize visualizer in video mode\n");
         delete visualizer;
@@ -664,7 +679,7 @@ int main(int argc, char **argv) {
       fprintf(stderr, "Video recording mode: %s (%dfps)\n", video_filename, video_fps);
     } else {
       // 通常の表示モード
-      init_success = visualizer->init("MDX Visualizer", 1100, window_height);
+      init_success = visualizer->init("MDX Visualizer", 1400, window_height);
       if (!init_success) {
         fprintf(stderr, "Failed to initialize visualizer\n");
         delete visualizer;
@@ -680,6 +695,11 @@ int main(int argc, char **argv) {
     
     // 波形スケールを設定
     visualizer->setWaveformScale(ym2151_waveform_scale, adpcm_waveform_scale);
+    
+    // スペクトラムデバッグモードを設定
+    if (spectrum_debug_filename) {
+      visualizer->setSpectrumDebug(spectrum_debug_filename);
+    }
     
     // ファイルリストを設定
     if (!file_list.empty()) {
@@ -907,8 +927,17 @@ reload_file:
 #ifdef __APPLE__
     // Audio playback mode - just wait
     if (play_audio) {
-      // ビジュアライザー使用時は曲の終了でも停止しない
 #ifdef ENABLE_VISUALIZER
+      // ビジュアライザー使用時は共有バッファからオーディオデータを取得
+      if (enable_visualizer && visualizer) {
+        pthread_mutex_lock(&audioCtx.buffer_mutex);
+        if (audioCtx.shared_buffer && audioCtx.shared_buffer_len > 0) {
+          visualizer->updateWaveform(audioCtx.shared_buffer, audioCtx.shared_buffer_len);
+        }
+        pthread_mutex_unlock(&audioCtx.buffer_mutex);
+      }
+      
+      // ビジュアライザー使用時は曲の終了でも停止しない
       if (!enable_visualizer)
 #endif
       {

@@ -2,6 +2,7 @@
 
 #include "platform_mac.h"
 #include <stdio.h>
+#include <string.h>
 #include <AudioToolbox/AudioQueue.h>
 #include <pthread.h>
 #include "../gamdx/mxdrvg/mxdrvg.h"
@@ -25,6 +26,14 @@ static void audioCallback(void *userData, AudioQueueRef queue, AudioQueueBufferR
     return;
   }
   
+  // Copy to shared buffer for visualizer
+  pthread_mutex_lock(&ctx->buffer_mutex);
+  if (ctx->shared_buffer) {
+    memcpy(ctx->shared_buffer, audio_buf, len * 4); // 2 channels * 2 bytes per sample
+    ctx->shared_buffer_len = len;
+  }
+  pthread_mutex_unlock(&ctx->buffer_mutex);
+  
   buffer->mAudioDataByteSize = len * 4; // 2 channels * 2 bytes
   AudioQueueEnqueueBuffer(queue, buffer, 0, NULL);
 }
@@ -36,6 +45,11 @@ bool initAudioQueue(AudioContext *ctx, int sample_rate, int buffer_samples) {
   ctx->terminated = false;
   pthread_mutex_init(&ctx->mutex, NULL);
   pthread_cond_init(&ctx->cond, NULL);
+  
+  // Initialize shared buffer for visualizer
+  ctx->shared_buffer = new short[buffer_samples * 2];
+  ctx->shared_buffer_len = 0;
+  pthread_mutex_init(&ctx->buffer_mutex, NULL);
   
   AudioStreamBasicDescription format = {0};
   format.mSampleRate = sample_rate;
@@ -81,6 +95,12 @@ void cleanupAudioQueue(AudioContext *ctx) {
   }
   pthread_mutex_destroy(&ctx->mutex);
   pthread_cond_destroy(&ctx->cond);
+  
+  if (ctx->shared_buffer) {
+    delete[] ctx->shared_buffer;
+    ctx->shared_buffer = NULL;
+  }
+  pthread_mutex_destroy(&ctx->buffer_mutex);
 }
 
 #endif // __APPLE__
