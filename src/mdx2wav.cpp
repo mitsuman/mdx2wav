@@ -828,13 +828,6 @@ reload_file:
     fprintf(stderr, "loop:%d fadeout:%d song_duration:%f\n", loop, fadeout, song_duration);
   }
 
-  // ビジュアライザー使用時は曲の長さ制限を無効化（手動終了またはファイル切り替えまで再生継続）
-  // ただし、動画録画モードの場合は-d/-lで指定された制限を使用
-#ifdef ENABLE_VISUALIZER
-  if (enable_visualizer && !video_filename) {
-    song_duration = 0.0f;  // 無制限（通常ビジュアライザー）
-  } else
-#endif
   {
     if (max_song_duration < song_duration) {
       song_duration = max_song_duration;
@@ -848,7 +841,7 @@ reload_file:
   for (int i = 0; song_duration == 0.0f || 1.0f * i * AUDIO_BUF_SAMPLES / SAMPLE_RATE < song_duration; i++) {
 #ifdef ENABLE_VISUALIZER
     // 動画モード: 累積オーディオ時間で正確に制御
-    if (video_filename && song_duration > 0.0f && total_audio_time >= song_duration) {
+    if (song_duration > 0.0f && total_audio_time >= song_duration) {
       break;
     }
     
@@ -937,7 +930,7 @@ reload_file:
         pthread_mutex_unlock(&audioCtx.buffer_mutex);
       }
       
-      // ビジュアライザー使用時は曲の終了でも停止しない
+      // ビジュアライザー使用時は曲の終了でも停止しない（duration指定がない場合）
       if (!enable_visualizer)
 #endif
       {
