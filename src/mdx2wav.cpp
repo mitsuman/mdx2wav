@@ -36,6 +36,378 @@ typedef unsigned int u32;
 
 const int MAGIC_OFFSET = 10;
 
+struct CommandLineOptions {
+  CommandLineOptions() {
+    snprintf(ym2151_type, sizeof(ym2151_type), "fmgen");
+  }
+
+  int mdx_buf_size = 256 * 1024;
+  int pdx_buf_size = 1024 * 1024;
+  int sample_rate = 44100;
+  int filter_mode = 0;
+  bool measure_play_time = false;
+  bool get_title = false;
+  bool play_audio = false;
+  bool enable_visualizer = false;
+  bool swap_channels = false;
+  bool show_help = false;
+  bool show_version = false;
+  bool verbose_logging = false;
+  float volume = 1.0f;
+  float ym2151_waveform_scale = 1.0f;
+  float adpcm_waveform_scale = 1.0f;
+  std::string screenshot_filename;
+  std::string spectrum_debug_filename;
+  std::string video_filename;
+  int video_fps = 60;
+  int ym2151_channels = 8;
+  int adpcm_channels = 8;
+  float max_song_duration = 300.0f;
+  int loop = 2;
+  int fadeout = 0;
+  char ym2151_type[8];
+  std::string mdx_input;
+};
+
+class CommandLineParser {
+ public:
+  CommandLineParser(int argc, char** argv) : argc_(argc), argv_(argv) {}
+
+  bool Parse(CommandLineOptions* options, std::string* error_message) {
+    if (!options || !error_message) {
+      return false;
+    }
+
+    std::vector<std::string> positional;
+    for (int i = 1; i < argc_; ++i) {
+      const char* raw_arg = argv_[i];
+      if (!raw_arg) {
+        continue;
+      }
+      std::string arg(raw_arg);
+      if (arg == "--") {
+        for (int j = i + 1; j < argc_; ++j) {
+          positional.emplace_back(argv_[j]);
+        }
+        break;
+      }
+      if (arg.size() > 2 && arg[0] == '-' && arg[1] == '-') {
+        if (!HandleLongOption(arg, i, options, error_message)) {
+          return false;
+        }
+        continue;
+      }
+      if (arg.size() > 1 && arg[0] == '-') {
+        if (!HandleShortOptions(arg, i, options, error_message)) {
+          return false;
+        }
+        continue;
+      }
+      positional.emplace_back(arg);
+    }
+
+    if (!positional.empty()) {
+      options->mdx_input = positional.front();
+    }
+
+    return true;
+  }
+
+ private:
+  static bool ParseFloat(const std::string& text, float* out) {
+    if (!out) {
+      return false;
+    }
+    char* end = nullptr;
+    float value = strtof(text.c_str(), &end);
+    if (end == text.c_str() || (end && *end != '\0')) {
+      return false;
+    }
+    *out = value;
+    return true;
+  }
+
+  static bool ParseInt(const std::string& text, int* out) {
+    if (!out) {
+      return false;
+    }
+    char* end = nullptr;
+    long value = strtol(text.c_str(), &end, 10);
+    if (end == text.c_str() || (end && *end != '\0')) {
+      return false;
+    }
+    *out = static_cast<int>(value);
+    return true;
+  }
+
+  bool HandleLongOption(const std::string& arg, int& index, CommandLineOptions* options, std::string* error_message) {
+    size_t eq_pos = arg.find('=');
+    std::string name = arg.substr(2, eq_pos == std::string::npos ? std::string::npos : eq_pos - 2);
+    std::string value;
+    if (eq_pos != std::string::npos) {
+      value = arg.substr(eq_pos + 1);
+    }
+
+    auto require_value = [&](std::string* out) -> bool {
+      if (!out) {
+        return false;
+      }
+      if (!value.empty()) {
+        *out = value;
+        value.clear();
+        return true;
+      }
+      if (index + 1 >= argc_) {
+        *error_message = "Missing value for option --" + name;
+        return false;
+      }
+      *out = argv_[++index];
+      return true;
+    };
+
+    if (name == "help") {
+      options->show_help = true;
+      return true;
+    }
+    if (name == "volume") {
+      std::string str;
+      if (!require_value(&str)) {
+        return false;
+      }
+      float val = atof(str.c_str());
+      if (val < 0.0f || val > 2.0f) {
+        *error_message = "Volume must be between 0.0 and 2.0.";
+        return false;
+      }
+      options->volume = val;
+      return true;
+    }
+    if (name == "swap-channels") {
+      options->swap_channels = true;
+      return true;
+    }
+#ifdef ENABLE_VISUALIZER
+    if (name == "video") {
+      std::string str;
+      if (!require_value(&str)) {
+        return false;
+      }
+      options->video_filename = str;
+      options->enable_visualizer = true;
+      return true;
+    }
+    if (name == "video-fps") {
+      std::string str;
+      if (!require_value(&str)) {
+        return false;
+      }
+      int fps = 0;
+      if (!ParseInt(str, &fps) || fps < 1 || fps > 120) {
+        *error_message = "Video FPS must be between 1 and 120.";
+        return false;
+      }
+      options->video_fps = fps;
+      return true;
+    }
+    if (name == "screenshot") {
+      std::string str;
+      if (!require_value(&str)) {
+        return false;
+      }
+      options->screenshot_filename = str;
+      options->enable_visualizer = true;
+      return true;
+    }
+    if (name == "ym2151-ch") {
+      std::string str;
+      if (!require_value(&str)) {
+        return false;
+      }
+      int value_int = 0;
+      if (!ParseInt(str, &value_int) || value_int < 1 || value_int > 8) {
+        *error_message = "YM2151 channels must be between 1 and 8.";
+        return false;
+      }
+      options->ym2151_channels = value_int;
+      return true;
+    }
+    if (name == "adpcm-ch") {
+      std::string str;
+      if (!require_value(&str)) {
+        return false;
+      }
+      int value_int = 0;
+      if (!ParseInt(str, &value_int) || value_int < 0 || value_int > 8) {
+        *error_message = "ADPCM channels must be between 0 and 8.";
+        return false;
+      }
+      options->adpcm_channels = value_int;
+      return true;
+    }
+    if (name == "ym2151-waveform-scale") {
+      std::string str;
+      if (!require_value(&str)) {
+        return false;
+      }
+      float val = 0.0f;
+      if (!ParseFloat(str, &val) || val < 0.1f || val > 10.0f) {
+        *error_message = "YM2151 waveform scale must be between 0.1 and 10.0.";
+        return false;
+      }
+      options->ym2151_waveform_scale = val;
+      return true;
+    }
+    if (name == "adpcm-waveform-scale") {
+      std::string str;
+      if (!require_value(&str)) {
+        return false;
+      }
+      float val = 0.0f;
+      if (!ParseFloat(str, &val) || val < 0.1f || val > 10.0f) {
+        *error_message = "ADPCM waveform scale must be between 0.1 and 10.0.";
+        return false;
+      }
+      options->adpcm_waveform_scale = val;
+      return true;
+    }
+    if (name == "waveform-scale") {
+      std::string str;
+      if (!require_value(&str)) {
+        return false;
+      }
+      float val = 0.0f;
+      if (!ParseFloat(str, &val) || val < 0.1f || val > 10.0f) {
+        *error_message = "Waveform scale must be between 0.1 and 10.0.";
+        return false;
+      }
+      options->ym2151_waveform_scale = val;
+      options->adpcm_waveform_scale = val;
+      return true;
+    }
+    if (name == "spectrum-debug") {
+      std::string str;
+      if (!require_value(&str)) {
+        return false;
+      }
+      options->spectrum_debug_filename = str;
+      options->enable_visualizer = true;
+      return true;
+    }
+#else
+    if (name == "video" || name == "video-fps" || name == "screenshot" ||
+        name == "ym2151-ch" || name == "adpcm-ch" ||
+        name == "ym2151-waveform-scale" || name == "adpcm-waveform-scale" ||
+        name == "waveform-scale" || name == "spectrum-debug") {
+      *error_message = "Visualizer support is not enabled.";
+      return false;
+    }
+#endif
+
+    *error_message = "Unknown option --" + name;
+    return false;
+  }
+
+  bool HandleShortOptions(const std::string& token, int& index, CommandLineOptions* options, std::string* error_message) {
+    size_t pos = 1;
+    while (pos < token.size()) {
+      char flag = token[pos];
+      auto require_value = [&](std::string* out) -> bool {
+        if (!out) {
+          return false;
+        }
+        if (pos + 1 < token.size()) {
+          *out = token.substr(pos + 1);
+          pos = token.size();
+          return true;
+        }
+        if (index + 1 >= argc_) {
+          *error_message = std::string("Missing value for option -") + flag;
+          return false;
+        }
+        *out = argv_[++index];
+        return true;
+      };
+
+      switch (flag) {
+        case 'h':
+          options->show_help = true;
+          return true;
+        case 'd': {
+          std::string str;
+          if (!require_value(&str)) {
+            return false;
+          }
+          options->max_song_duration = atof(str.c_str());
+          break;
+        }
+        case 'e': {
+          std::string str;
+          if (!require_value(&str)) {
+            return false;
+          }
+          snprintf(options->ym2151_type, sizeof(options->ym2151_type), "%s", str.c_str());
+          break;
+        }
+        case 'f':
+          options->fadeout = 1;
+          break;
+        case 'g':
+#ifdef ENABLE_VISUALIZER
+          options->enable_visualizer = true;
+          break;
+#else
+          *error_message = "Visualizer support is not enabled. Rebuild with -DENABLE_VISUALIZER=ON";
+          return false;
+#endif
+        case 'l': {
+          std::string str;
+          if (!require_value(&str)) {
+            return false;
+          }
+          options->loop = atoi(str.c_str());
+          break;
+        }
+        case 'm':
+          options->measure_play_time = true;
+          break;
+        case 'p':
+#ifdef __APPLE__
+          options->play_audio = true;
+          break;
+#else
+          *error_message = "Audio playback (-p) is only supported on macOS.";
+          return false;
+#endif
+        case 'r': {
+          std::string str;
+          if (!require_value(&str)) {
+            return false;
+          }
+          options->sample_rate = atoi(str.c_str());
+          break;
+        }
+        case 't':
+          options->get_title = true;
+          break;
+        case 'v':
+          options->show_version = true;
+          return true;
+        case 'V':
+          options->verbose_logging = true;
+          break;
+        default:
+          *error_message = std::string("Unknown option -") + flag;
+          return false;
+      }
+      ++pos;
+    }
+    return true;
+  }
+
+  int argc_ = 0;
+  char** argv_ = nullptr;
+};
+
 // @param mode 0:tolower, 1:toupper, 2:normal
 void strcpy_cnv(char *dst, const char *src, int mode) {
   while (int c = *src++) {
@@ -318,260 +690,60 @@ void help() {
 
 
 int main(int argc, char **argv) {
-  // Check for -h or --help anywhere in arguments first
-  for (int i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-      help();
-      return 0;
+  CommandLineOptions options;
+  CommandLineParser parser(argc, argv);
+  std::string parse_error;
+  if (!parser.Parse(&options, &parse_error)) {
+    if (!parse_error.empty()) {
+      fprintf(stderr, "%s\n", parse_error.c_str());
     }
+    help();
+    return -1;
   }
-  
-  int MDX_BUF_SIZE = 256 * 1024;
-  int PDX_BUF_SIZE = 1024 * 1024;
-  int SAMPLE_RATE = 44100;
-  int filter_mode = 0;
 
-  bool measure_play_time = false;
-  bool get_title = false;
-  bool play_audio = false;
-  bool enable_visualizer = false;
-  bool swap_channels = false;
-  float volume = 1.0f;
-  float ym2151_waveform_scale = 1.0f;
-  float adpcm_waveform_scale = 1.0f;
-  const char* screenshot_filename = nullptr;
-  const char* spectrum_debug_filename = nullptr;
+  if (options.show_help) {
+    help();
+    return 0;
+  }
+
+  if (options.show_version) {
+    version();
+    return 0;
+  }
+
+  verbose = options.verbose_logging;
+
+  int MDX_BUF_SIZE = options.mdx_buf_size;
+  int PDX_BUF_SIZE = options.pdx_buf_size;
+  int SAMPLE_RATE = options.sample_rate;
+  int filter_mode = options.filter_mode;
+
+  bool measure_play_time = options.measure_play_time;
+  bool get_title = options.get_title;
+  bool play_audio = options.play_audio;
+  bool enable_visualizer = options.enable_visualizer;
+  bool swap_channels = options.swap_channels;
+  float volume = options.volume;
+  float max_song_duration = options.max_song_duration;
+  int loop = options.loop;
+  int fadeout = options.fadeout;
+  char ym2151_type[8];
+  strncpy(ym2151_type, options.ym2151_type, sizeof(ym2151_type));
+  ym2151_type[sizeof(ym2151_type) - 1] = 0;
+
   const char* video_filename = nullptr;
-  int video_fps = 60;
-  int ym2151_channels = 8;
-  int adpcm_channels = 8;
-  float max_song_duration = 300.0f;
-  int loop = 2;
-  int fadeout = 0;
-  char ym2151_type[8] = "fmgen";
-
-  int opt;
-  // Handle long options
-  for (int i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "--video") == 0 && i + 1 < argc) {
 #ifdef ENABLE_VISUALIZER
-      video_filename = argv[i + 1];
-      enable_visualizer = true;
-      // Remove these args from argv
-      for (int j = i; j < argc - 2; j++) {
-        argv[j] = argv[j + 2];
-      }
-      argc -= 2;
-      i--;
-#else
-      fprintf(stderr, "Visualizer support is not enabled.\n");
-      return -1;
-#endif
-    } else if (strcmp(argv[i], "--video-fps") == 0 && i + 1 < argc) {
-#ifdef ENABLE_VISUALIZER
-      video_fps = atoi(argv[i + 1]);
-      if (video_fps < 1 || video_fps > 120) {
-        fprintf(stderr, "Video FPS must be between 1 and 120.\n");
-        return -1;
-      }
-      // Remove these args from argv
-      for (int j = i; j < argc - 2; j++) {
-        argv[j] = argv[j + 2];
-      }
-      argc -= 2;
-      i--;
-#else
-      fprintf(stderr, "Visualizer support is not enabled.\n");
-      return -1;
-#endif
-    } else if (strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) {
-#ifdef ENABLE_VISUALIZER
-      screenshot_filename = argv[i + 1];
-      enable_visualizer = true;
-      // Remove these args from argv
-      for (int j = i; j < argc - 2; j++) {
-        argv[j] = argv[j + 2];
-      }
-      argc -= 2;
-      i--;
-#else
-      fprintf(stderr, "Visualizer support is not enabled.\n");
-      return -1;
-#endif
-    } else if (strcmp(argv[i], "--swap-channels") == 0) {
-      swap_channels = true;
-      // Remove this arg from argv
-      for (int j = i; j < argc - 1; j++) {
-        argv[j] = argv[j + 1];
-      }
-      argc--;
-      i--;
-    } else if (strcmp(argv[i], "--volume") == 0 && i + 1 < argc) {
-      volume = atof(argv[i + 1]);
-      if (volume < 0.0f || volume > 2.0f) {
-        fprintf(stderr, "Volume must be between 0.0 and 2.0.\n");
-        return -1;
-      }
-      // Remove these args from argv
-      for (int j = i; j < argc - 2; j++) {
-        argv[j] = argv[j + 2];
-      }
-      argc -= 2;
-      i--;
-    } else if (strcmp(argv[i], "--ym2151-ch") == 0 && i + 1 < argc) {
-#ifdef ENABLE_VISUALIZER
-      ym2151_channels = atoi(argv[i + 1]);
-      if (ym2151_channels < 1 || ym2151_channels > 8) {
-        fprintf(stderr, "YM2151 channels must be between 1 and 8.\n");
-        return -1;
-      }
-      // Remove these args from argv
-      for (int j = i; j < argc - 2; j++) {
-        argv[j] = argv[j + 2];
-      }
-      argc -= 2;
-      i--;
-#else
-      fprintf(stderr, "Visualizer support is not enabled.\n");
-      return -1;
-#endif
-    } else if (strcmp(argv[i], "--adpcm-ch") == 0 && i + 1 < argc) {
-#ifdef ENABLE_VISUALIZER
-      adpcm_channels = atoi(argv[i + 1]);
-      if (adpcm_channels < 0 || adpcm_channels > 8) {
-        fprintf(stderr, "ADPCM channels must be between 0 and 8.\n");
-        return -1;
-      }
-      // Remove these args from argv
-      for (int j = i; j < argc - 2; j++) {
-        argv[j] = argv[j + 2];
-      }
-      argc -= 2;
-      i--;
-#else
-      fprintf(stderr, "Visualizer support is not enabled.\n");
-      return -1;
-#endif
-    } else if (strcmp(argv[i], "--ym2151-waveform-scale") == 0 && i + 1 < argc) {
-#ifdef ENABLE_VISUALIZER
-      ym2151_waveform_scale = atof(argv[i + 1]);
-      if (ym2151_waveform_scale < 0.1f || ym2151_waveform_scale > 10.0f) {
-        fprintf(stderr, "YM2151 waveform scale must be between 0.1 and 10.0.\n");
-        return -1;
-      }
-      // Remove these args from argv
-      for (int j = i; j < argc - 2; j++) {
-        argv[j] = argv[j + 2];
-      }
-      argc -= 2;
-      i--;
-#else
-      fprintf(stderr, "Visualizer support is not enabled.\n");
-      return -1;
-#endif
-    } else if (strcmp(argv[i], "--adpcm-waveform-scale") == 0 && i + 1 < argc) {
-#ifdef ENABLE_VISUALIZER
-      adpcm_waveform_scale = atof(argv[i + 1]);
-      if (adpcm_waveform_scale < 0.1f || adpcm_waveform_scale > 10.0f) {
-        fprintf(stderr, "ADPCM waveform scale must be between 0.1 and 10.0.\n");
-        return -1;
-      }
-      // Remove these args from argv
-      for (int j = i; j < argc - 2; j++) {
-        argv[j] = argv[j + 2];
-      }
-      argc -= 2;
-      i--;
-#else
-      fprintf(stderr, "Visualizer support is not enabled.\n");
-      return -1;
-#endif
-    } else if (strcmp(argv[i], "--waveform-scale") == 0 && i + 1 < argc) {
-#ifdef ENABLE_VISUALIZER
-      float scale = atof(argv[i + 1]);
-      if (scale < 0.1f || scale > 10.0f) {
-        fprintf(stderr, "Waveform scale must be between 0.1 and 10.0.\n");
-        return -1;
-      }
-      ym2151_waveform_scale = scale;
-      adpcm_waveform_scale = scale;
-      // Remove these args from argv
-      for (int j = i; j < argc - 2; j++) {
-        argv[j] = argv[j + 2];
-      }
-      argc -= 2;
-      i--;
-#else
-      fprintf(stderr, "Visualizer support is not enabled.\n");
-      return -1;
-#endif
-    } else if (strcmp(argv[i], "--spectrum-debug") == 0 && i + 1 < argc) {
-#ifdef ENABLE_VISUALIZER
-      spectrum_debug_filename = argv[i + 1];
-      // Remove these args from argv
-      for (int j = i; j < argc - 2; j++) {
-        argv[j] = argv[j + 2];
-      }
-      argc -= 2;
-      i--;
-      enable_visualizer = true;
-#else
-      fprintf(stderr, "Visualizer support is not enabled.\n");
-      return -1;
-#endif
-    }
+  if (!options.video_filename.empty()) {
+    video_filename = options.video_filename.c_str();
   }
-  
-  while ((opt = getopt(argc, argv, "d:e:fgl:mpr:tvV")) != -1) {
-    switch (opt) {
-      case 'd':
-        max_song_duration = atof(optarg);
-        break;
-      case 'e':
-        strncpy(ym2151_type, optarg, sizeof(ym2151_type));
-        break;
-      case 'f':
-        fadeout = 1;
-        break;
-      case 'g':
-#ifdef ENABLE_VISUALIZER
-        enable_visualizer = true;
-#else
-        fprintf(stderr, "Visualizer support is not enabled. Rebuild with -DENABLE_VISUALIZER=ON\n");
-        return -1;
+  float ym2151_waveform_scale = options.ym2151_waveform_scale;
+  float adpcm_waveform_scale = options.adpcm_waveform_scale;
+  const char* screenshot_filename = options.screenshot_filename.empty() ? nullptr : options.screenshot_filename.c_str();
+  const char* spectrum_debug_filename = options.spectrum_debug_filename.empty() ? nullptr : options.spectrum_debug_filename.c_str();
+  int video_fps = options.video_fps;
+  int ym2151_channels = options.ym2151_channels;
+  int adpcm_channels = options.adpcm_channels;
 #endif
-        break;
-      case 'l':
-        loop = atoi(optarg);
-        break;
-      case 'm':
-        measure_play_time = true;
-        break;
-      case 'p':
-#ifdef __APPLE__
-        play_audio = true;
-#else
-        fprintf(stderr, "Audio playback (-p) is only supported on macOS.\n");
-        return -1;
-#endif
-        break;
-      case 'r':
-        SAMPLE_RATE = atoi(optarg);
-        break;
-      case 't':
-        get_title = true;
-        break;
-      case 'v':
-        version();
-        return 0;
-      case 'V':
-        verbose = true;
-        break;
-      default:
-        help();
-        return 0;
-    }
-  }
 
   int AUDIO_BUF_SAMPLES = SAMPLE_RATE / 100; // 10ms
 
@@ -581,7 +753,7 @@ int main(int argc, char **argv) {
     return -1;
   }
 
-  const char *mdx_name = argv[optind];
+  const char *mdx_name = options.mdx_input.empty() ? nullptr : options.mdx_input.c_str();
   if (mdx_name == 0 || *mdx_name == 0) {
     help();
     return 0;
