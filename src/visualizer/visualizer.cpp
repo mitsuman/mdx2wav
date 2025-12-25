@@ -1,4 +1,5 @@
 #include "visualizer.h"
+#include "video_encoder.h"
 #include "../../gamdx/fmgen/opm.h"
 #include "../../gamdx/mxdrvg/opm_visualizer.h"
 
@@ -12,6 +13,10 @@
 #include <vector>
 #include <sys/time.h>
 #include <iconv.h>
+
+#ifdef __APPLE__
+#include <CoreMIDI/CoreMIDI.h>
+#endif
 
 // 波形表示用のバッファサイズ
 static const int WAVEFORM_BUFFER_SIZE = 2048;
@@ -38,6 +43,12 @@ Visualizer::Visualizer()
     , opm_wrapper_(nullptr)
     , running_(false)
     , initialized_(false)
+    , video_mode_(false)
+    , video_encoder_(nullptr)
+    , offscreen_surface_(nullptr)
+    , video_width_(0)
+    , video_height_(0)
+    , video_fps_(0)
     , frame_count_(0)
     , screenshot_taken_(false)
     , screenshot_mode_(false)
@@ -56,11 +67,18 @@ Visualizer::Visualizer()
     , current_file_index_(0)
     , file_change_requested_(false)
     , requested_file_index_(0)
+    , restart_requested_(false)
     , mxdrvg_paused_(false)
     , ym2151_muted_(false)
     , selected_channel_(0)
-    , octave_offset_(0)
-    , polyphonic_mode_(false) {
+    , octave_offset_(-1)
+    , polyphonic_mode_(false)
+    , midi_client_(0)
+    , midi_port_(0)
+    , ym2151_display_channels_(8)
+    , adpcm_display_channels_(8)
+    , ym2151_waveform_scale_(1.0f)
+    , adpcm_waveform_scale_(1.0f) {
     song_title_[0] = '\0';
     filename_[0] = '\0';
     
@@ -69,6 +87,13 @@ Visualizer::Visualizer()
         channel_keys_[i].active = false;
         channel_keys_[i].midi_note = -1;
         channel_keys_[i].key_on_time = 0;
+    }
+    
+    // 前フレーム波形データの初期化
+    for (int i = 0; i < MAX_CHANNELS; i++) {
+        memset(prev_waveform_[i], 0, sizeof(prev_waveform_[i]));
+        prev_waveform_offset_[i] = 0;
+        has_prev_waveform_[i] = false;
     }
     
     // ADPCMピーク情報の初期化
@@ -85,66 +110,22 @@ Visualizer::~Visualizer() {
     shutdown();
 }
 
-bool Visualizer::init(const char* title, int width, int height) {
-    if (initialized_) {
-        return true;
-    }
-    
-    // SDL初期化
-    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
-        fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
-        return false;
-    }
-    
-    // ウィンドウ作成
-    window_ = SDL_CreateWindow(
-        title,
-        SDL_WINDOWPOS_CENTERED,
-        SDL_WINDOWPOS_CENTERED,
-        width, height,
-        SDL_WINDOW_SHOWN
-    );
-    
-    if (!window_) {
-        fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
-        SDL_Quit();
-        return false;
-    }
-    
-    // レンダラー作成
-    renderer_ = SDL_CreateRenderer(
-        window_, -1,
-        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC
-    );
-    
-    if (!renderer_) {
-        fprintf(stderr, "SDL_CreateRenderer failed: %s\n", SDL_GetError());
-        SDL_DestroyWindow(window_);
-        SDL_Quit();
-        return false;
-    }
-    
-    impl = new VisualizerImpl();
-    
+// 共通の初期化処理（TTF、フォント読み込み）
+bool Visualizer::initCommon() {
     // TTF初期化
     if (TTF_Init() < 0) {
         fprintf(stderr, "TTF_Init failed: %s\n", TTF_GetError());
-        delete impl;
-        impl = nullptr;
-        SDL_DestroyRenderer(renderer_);
-        SDL_DestroyWindow(window_);
-        SDL_Quit();
         return false;
     }
     
-    // dataディレクトリのピクセルフォントを優先的に使用
+    // データディレクトリのピクセルフォントを優先的に使用
     const char* font_paths[] = {
-        "data/8-bit-6x6-nostalgia.otf",      // ピクセルフォント（相対パス）
-        "../data/8-bit-6x6-nostalgia.otf",      // ピクセルフォント（相対パス）
-        "data/6x6-pixel-font.otf",                  // ピクセルフォント（相対パス）
-        "../data/6x6-pixel-font.otf",               // ビルドディレクトリから
-        "/System/Library/Fonts/Courier.ttc",        // フォールバック: タイプライター風
-        "/System/Library/Fonts/Monaco.ttc",         // フォールバック: モノスペース
+        "data/8-bit-6x6-nostalgia.otf",
+        "../data/8-bit-6x6-nostalgia.otf",
+        "data/6x6-pixel-font.otf",
+        "../data/6x6-pixel-font.otf",
+        "/System/Library/Fonts/Courier.ttc",
+        "/System/Library/Fonts/Monaco.ttc",
         nullptr
     };
     
@@ -197,13 +178,13 @@ bool Visualizer::init(const char* title, int width, int height) {
     
     // 日本語フォントの読み込み（モノスペースフォントを優先）
     const char* japanese_font_paths[] = {
-        "data/KH-Dot-Kagurazaka-16.ttf",  // ピクセルフォント（相対パス）
-        "../data/KH-Dot-Kagurazaka-16.ttf",  // ピ
-        "data/KH-Dot-Akihabara-16.ttf",  // ピクセルフォント（相対パス）
-        "../data/KH-Dot-Akihabara-16.ttf",  // ピクセルフォント（相対パス）
-        "/System/Library/Fonts/Osaka.ttf",  // Osaka (monospace)
-        "/System/Library/Fonts/Supplemental/Courier New.ttf",  // Courier New (monospace)
-        "/System/Library/Fonts/Supplemental/Monaco.dfont",  // Monaco (monospace)
+        "data/KH-Dot-Kagurazaka-16.ttf",
+        "../data/KH-Dot-Kagurazaka-16.ttf",
+        "data/KH-Dot-Akihabara-16.ttf",
+        "../data/KH-Dot-Akihabara-16.ttf",
+        "/System/Library/Fonts/Osaka.ttf",
+        "/System/Library/Fonts/Supplemental/Courier New.ttf",
+        "/System/Library/Fonts/Supplemental/Monaco.dfont",
         "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
         "/System/Library/Fonts/Hiragino Sans GB.ttc",
         "/Library/Fonts/Arial Unicode.ttf",
@@ -226,11 +207,166 @@ bool Visualizer::init(const char* title, int width, int height) {
         fprintf(stderr, "Warning: Failed to load Japanese font\n");
     }
     
-    // タイトルの初期値（MDXファイル名から取得予定）
+    // タイトルの初期値
     snprintf(song_title_, sizeof(song_title_), "YM2151 Visualizer");
+    
+    return true;
+}
+
+// 共通のクリーンアップ処理
+void Visualizer::cleanupCommon() {
+    if (bitmap_font_texture_) {
+        SDL_DestroyTexture((SDL_Texture*)bitmap_font_texture_);
+        bitmap_font_texture_ = nullptr;
+    }
+    if (font_small_) {
+        TTF_CloseFont((TTF_Font*)font_small_);
+        font_small_ = nullptr;
+    }
+    if (font_medium_) {
+        TTF_CloseFont((TTF_Font*)font_medium_);
+        font_medium_ = nullptr;
+    }
+    if (font_large_) {
+        TTF_CloseFont((TTF_Font*)font_large_);
+        font_large_ = nullptr;
+    }
+    if (font_japanese_) {
+        TTF_CloseFont((TTF_Font*)font_japanese_);
+        font_japanese_ = nullptr;
+    }
+    TTF_Quit();
+}
+
+bool Visualizer::init(const char* title, int width, int height) {
+    if (initialized_) {
+        return true;
+    }
+    
+    // SDL初期化
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+        return false;
+    }
+    
+    // ウィンドウ作成
+    window_ = SDL_CreateWindow(
+        title,
+        SDL_WINDOWPOS_CENTERED,
+        SDL_WINDOWPOS_CENTERED,
+        width, height,
+        SDL_WINDOW_SHOWN
+    );
+    
+    if (!window_) {
+        fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
+        SDL_Quit();
+        return false;
+    }
+    
+    // レンダラー作成
+    renderer_ = SDL_CreateRenderer(
+        window_, -1,
+        SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC
+    );
+    
+    if (!renderer_) {
+        fprintf(stderr, "SDL_CreateRenderer failed: %s\n", SDL_GetError());
+        SDL_DestroyWindow(window_);
+        SDL_Quit();
+        return false;
+    }
+    
+    impl = new VisualizerImpl();
+    
+    // 共通の初期化処理を呼び出し
+    if (!initCommon()) {
+        delete impl;
+        impl = nullptr;
+        SDL_DestroyRenderer(renderer_);
+        SDL_DestroyWindow(window_);
+        SDL_Quit();
+        return false;
+    }
+    
+    // MIDI入力を初期化（リアルタイムモードのみ）
+    if (initMIDI()) {
+        fprintf(stderr, "MIDI input initialized\n");
+    }
     
     initialized_ = true;
     running_ = true;
+    
+    return true;
+}
+
+bool Visualizer::initVideoMode(const char* video_filename, int width, int height, int fps, int sample_rate) {
+    if (initialized_) {
+        return true;
+    }
+    
+    video_mode_ = true;
+    video_width_ = width;
+    video_height_ = height;
+    video_fps_ = fps;
+    
+    // SDL初期化（オフスクリーンレンダリング用）
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+        return false;
+    }
+    
+    // オフスクリーンサーフェスを作成（動画フレームバッファ）
+    // 32ビットRGBA形式で作成（SDL_CreateSoftwareRendererはRGBA形式が必要）
+    offscreen_surface_ = SDL_CreateRGBSurface(0, width, height, 32, 
+                                              0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000);
+    if (!offscreen_surface_) {
+        fprintf(stderr, "Failed to create offscreen surface: %s\n", SDL_GetError());
+        SDL_Quit();
+        return false;
+    }
+    
+    // オフスクリーンサーフェス用のレンダラーを作成
+    renderer_ = SDL_CreateSoftwareRenderer(offscreen_surface_);
+    if (!renderer_) {
+        fprintf(stderr, "Failed to create software renderer: %s\n", SDL_GetError());
+        SDL_FreeSurface(offscreen_surface_);
+        SDL_Quit();
+        return false;
+    }
+    
+    impl = new VisualizerImpl();
+    
+    // 共通の初期化処理を呼び出し
+    if (!initCommon()) {
+        delete impl;
+        impl = nullptr;
+        SDL_DestroyRenderer(renderer_);
+        SDL_FreeSurface(offscreen_surface_);
+        SDL_Quit();
+        return false;
+    }
+    
+    // VideoEncoderを初期化
+    video_encoder_ = new VideoEncoder();
+    if (!video_encoder_->init(video_filename, width, height, fps, sample_rate, 2)) {
+        fprintf(stderr, "Failed to initialize video encoder: %s\n", video_encoder_->getError());
+        delete video_encoder_;
+        video_encoder_ = nullptr;
+        cleanupCommon();
+        delete impl;
+        impl = nullptr;
+        SDL_DestroyRenderer(renderer_);
+        SDL_FreeSurface(offscreen_surface_);
+        SDL_Quit();
+        return false;
+    }
+    
+    initialized_ = true;
+    running_ = true;
+    
+    fprintf(stderr, "Video mode initialized: %s (%dx%d @ %dfps)\n", 
+            video_filename, width, height, fps);
     
     return true;
 }
@@ -241,6 +377,11 @@ void Visualizer::setState(YM2151State* state) {
 
 void Visualizer::updateWaveform(const short* samples, int count) {
     if (!impl || !samples) return;
+    
+    // 動画モードの場合は音声エンコーダーに送る
+    if (video_mode_ && video_encoder_) {
+        video_encoder_->addAudioSamples(samples, count);
+    }
     
     // サンプルをダウンサンプリングして波形バッファに格納
     int stride = std::max(1, count / (WAVEFORM_BUFFER_SIZE / 4));
@@ -289,6 +430,11 @@ void Visualizer::update() {
                 // MXDRVGの一時停止/再開（レジスタ書き込みのみ停止、PCM生成は継続）
                 mxdrvg_paused_ = !mxdrvg_paused_;
                 fprintf(stderr, "MXDRVG %s\n", mxdrvg_paused_ ? "PAUSED" : "RESUMED");
+            } else if (event.key.keysym.sym == SDLK_c) {
+                // 曲の頭から再生
+                restart_requested_ = true;
+                fprintf(stderr, "Restarting song from beginning\n");
+                return;
             } else if (event.key.keysym.sym == SDLK_b && state_ && opm_ptr_) {
                 // Timer Bをトグル
                 state_->toggleTimerB(opm_ptr_);
@@ -309,6 +455,24 @@ void Visualizer::update() {
                         if (polyphonic_mode_) {
                             channel_keys_[ch].active = false;
                         }
+                    }
+                }
+            } else if (event.key.keysym.sym >= SDLK_F1 && event.key.keysym.sym <= SDLK_F8) {
+                // F1-F8: プリセット保存/読み込み
+                int preset_num = event.key.keysym.sym - SDLK_F1 + 1;
+                if (ym2151_muted_) {
+                    // ミュート時は読み込み
+                    if (loadChannelPreset(preset_num)) {
+                        fprintf(stderr, "Loaded preset %d to all channels\n", preset_num);
+                    } else {
+                        fprintf(stderr, "Failed to load preset %d\n", preset_num);
+                    }
+                } else {
+                    // 非ミュート時は保存
+                    if (saveChannelPreset(preset_num)) {
+                        fprintf(stderr, "Saved channel %d to preset %d\n", selected_channel_, preset_num);
+                    } else {
+                        fprintf(stderr, "Failed to save preset %d\n", preset_num);
                     }
                 }
             } else if (event.key.keysym.sym == SDLK_F9) {
@@ -425,7 +589,7 @@ void Visualizer::update() {
     renderTimerInfo();
     renderChannelInfo();
     renderKeyboard();
-    // renderWaveform();  // 一時的にオフ
+    //renderWaveform();
     
     // 画面更新
     SDL_RenderPresent(renderer_);
@@ -449,6 +613,50 @@ void Visualizer::update() {
     }
 }
 
+bool Visualizer::renderVideoFrame() {
+    if (!initialized_ || !video_mode_ || !running_) {
+        return false;
+    }
+    
+    if (!state_ || !video_encoder_) {
+        return false;
+    }
+    
+    // 背景クリア（濃い青紫）
+    SDL_SetRenderDrawColor(renderer_, 10, 10, 40, 255);
+    SDL_RenderClear(renderer_);
+    
+    // 再生時間を更新（動画モード時はフレーム数から計算）
+    elapsed_time_ = frame_count_ / (double)video_fps_;
+    
+    // 各種描画（通常モードと同じ）
+    renderTitle();
+    renderTimerInfo();
+    renderChannelInfo();
+    renderKeyboard();
+    
+    // レンダラーの内容をサーフェスに反映
+    SDL_RenderPresent(renderer_);
+    
+    // RGBピクセルデータを取得
+    unsigned char* pixels = (unsigned char*)offscreen_surface_->pixels;
+    
+    // 動画エンコーダーにフレームを追加
+    if (!video_encoder_->addVideoFrame(pixels)) {
+        fprintf(stderr, "Failed to add video frame: %s\n", video_encoder_->getError());
+        running_ = false;
+        return false;
+    }
+    
+    // レジスタ書き込みカウンタをリセット
+    state_->resetRegisterWriteCounts();
+    
+    // フレームカウンター
+    frame_count_++;
+    
+    return true;
+}
+
 void Visualizer::shutdown() {
     if (!initialized_) {
         return;
@@ -456,34 +664,29 @@ void Visualizer::shutdown() {
     
     running_ = false;
     
+    // 動画エンコーダーをファイナライズ
+    if (video_encoder_) {
+        video_encoder_->finalize();
+        delete video_encoder_;
+        video_encoder_ = nullptr;
+    }
+    
+    // オフスクリーンサーフェスを解放
+    if (offscreen_surface_) {
+        SDL_FreeSurface(offscreen_surface_);
+        offscreen_surface_ = nullptr;
+    }
+    
+    // MIDI入力をクリーンアップ
+    shutdownMIDI();
+    
     if (impl) {
         delete impl;
         impl = nullptr;
     }
     
-    // フォントを解放
-    if (font_large_) {
-        TTF_CloseFont((TTF_Font*)font_large_);
-        font_large_ = nullptr;
-    }
-    if (font_medium_) {
-        TTF_CloseFont((TTF_Font*)font_medium_);
-        font_medium_ = nullptr;
-    }
-    if (font_small_) {
-        TTF_CloseFont((TTF_Font*)font_small_);
-        font_small_ = nullptr;
-    }
-    if (font_japanese_) {
-        TTF_CloseFont((TTF_Font*)font_japanese_);
-        font_japanese_ = nullptr;
-    }
-    
-    // ビットマップフォントテクスチャを解放
-    if (bitmap_font_texture_) {
-        SDL_DestroyTexture((SDL_Texture*)bitmap_font_texture_);
-        bitmap_font_texture_ = nullptr;
-    }
+    // フォントとTTFをクリーンアップ
+    cleanupCommon();
     
     if (renderer_) {
         SDL_DestroyRenderer(renderer_);
@@ -494,8 +697,6 @@ void Visualizer::shutdown() {
         SDL_DestroyWindow(window_);
         window_ = nullptr;
     }
-    
-    TTF_Quit();
     
     SDL_Quit();
     initialized_ = false;
@@ -1304,26 +1505,49 @@ void Visualizer::renderTimerInfo() {
     YM2151State::TimerState timer;
     state_->getTimerState(timer);
     
-    int y = 42;
+    int y = 44;
     int x = 10;
+    
+    // システム情報を表示（TIMER-Aと同じ行）
+    renderBitmapText("SHARP X68000 / MXDRV 2.06+17 Rel.X5-S / MXDRVg V1.50a / mdx2wav 20251225 by mtm", x, y, 100, 140, 200);
+    
+    // TIMER情報をシステム情報の右側に配置
+    int timer_x = x + 640;  // システム情報の右側から開始
     
     // Timer A情報
     char timer_a_text[64];
-    snprintf(timer_a_text, sizeof(timer_a_text), "TimerA:%04d %s", 
+    snprintf(timer_a_text, sizeof(timer_a_text), "TIMER-A:%04d %s", 
              timer.timer_a, timer.timer_a_enable ? "ON" : "OFF");
-    renderBitmapText(timer_a_text, x, y, 
+    renderBitmapText(timer_a_text, timer_x, y, 
                     timer.timer_a_enable ? 100 : 60,
                     timer.timer_a_enable ? 200 : 100,
                     timer.timer_a_enable ? 100 : 60);
     
     // Timer B情報
     char timer_b_text[64];
-    snprintf(timer_b_text, sizeof(timer_b_text), "TimerB:%03d %s", 
+    snprintf(timer_b_text, sizeof(timer_b_text), "TIMER-B:%03d %s", 
              timer.timer_b, timer.timer_b_enable ? "ON" : "OFF");
-    renderBitmapText(timer_b_text, x + 150, y,
+    renderBitmapText(timer_b_text, timer_x + 150, y,
                     timer.timer_b_enable ? 100 : 60,
-                    timer.timer_b_enable ? 100 : 60,
-                    timer.timer_b_enable ? 200 : 100);
+                    timer.timer_b_enable ? 200 : 100,
+                    timer.timer_b_enable ? 100 : 60);
+    
+    // Mute indicator
+    if (ym2151_muted_) {
+        renderBitmapText("MUTE", timer_x + 300, y, 255, 80, 80);
+    }
+    
+    // Polyphonic mode indicator
+    if (polyphonic_mode_) {
+        renderBitmapText("POLY", timer_x + 360, y, 80, 200, 255);
+    }
+    
+#ifdef __APPLE__
+    // MIDI input indicator
+    if (midi_client_ != 0) {
+        renderBitmapText("MIDI-IN", timer_x + 420, y, 100, 255, 100);
+    }
+#endif
     
     // 区切り線
     SDL_SetRenderDrawColor(renderer_, 60, 70, 100, 255);
@@ -1339,11 +1563,11 @@ void Visualizer::renderChannelInfo() {
     TTF_Font* font_med = (TTF_Font*)font_medium_;
     TTF_Font* font_sm = (TTF_Font*)font_small_;
     
-    int y = 65;  // タイトル + Timer情報分のスペースを確保
-    int line_height = 70;
+    int y = YM2151_START_Y;
+    int line_height = YM2151_LINE_HEIGHT;
     
-    // FMチャンネル (0-7) + ADPCMチャンネル (8-15)
-    for (int ch = 0; ch < 8; ch++) {
+    // FMチャンネル (0-7) - 表示チャンネル数分だけ表示
+    for (int ch = 0; ch < ym2151_display_channels_; ch++) {
         auto& c = channels[ch];
         
         int r, g, b;
@@ -1356,7 +1580,7 @@ void Visualizer::renderChannelInfo() {
         
         // 7セグメント表示でチャンネル番号を表示
         int seg_x = 20;
-        int seg_y = y + 20;
+        int seg_y = y + 10;
         int seg_w = 8;
         int seg_h = 7;
         
@@ -1391,18 +1615,25 @@ void Visualizer::renderChannelInfo() {
         }
         
         // オレンジ色（出力がある時は明るく、ない時は暗く）
-        int seg_r = has_output ? 255 : 120;
-        int seg_g = has_output ? 140 : 60;
-        int seg_b = has_output ? 0 : 0;
+        int seg_r = has_output ? CHANNEL_LABEL_COLOR_ACTIVE_R : CHANNEL_LABEL_COLOR_INACTIVE_R;
+        int seg_g = has_output ? CHANNEL_LABEL_COLOR_ACTIVE_G : CHANNEL_LABEL_COLOR_INACTIVE_G;
+        int seg_b = has_output ? CHANNEL_LABEL_COLOR_ACTIVE_B : CHANNEL_LABEL_COLOR_INACTIVE_B;
         
         // チャンネル番号を7セグメント表示
         draw7Segment(seg_x, seg_y, ch, seg_r, seg_g, seg_b, seg_w, seg_h);
         
-        // "YM2151"ラベルを表示（チャンネル番号の下）
+        // "YAMAHA"ラベルを表示（チャンネル番号の下、YM2151の上）
         if (bitmap_font_texture_) {
-            renderBitmapText("YM2151", 10, seg_y + 18, seg_r, seg_g, seg_b);
+            renderBitmapText("YAMAHA", 10, seg_y + 20, seg_r, seg_g, seg_b);
         } else if (font_sm) {
-            renderText(renderer_, font_sm, "YM2151", 10, seg_y + 16, seg_r, seg_g, seg_b);
+            renderText(renderer_, font_sm, "YAMAHA", 10, seg_y + 20, seg_r, seg_g, seg_b);
+        }
+        
+        // "YM2151"ラベルを表示（YAMAHAの下）
+        if (bitmap_font_texture_) {
+            renderBitmapText("YM2151", 10, seg_y + 28, seg_r, seg_g, seg_b);
+        } else if (font_sm) {
+            renderText(renderer_, font_sm, "YM2151", 10, seg_y + 28, seg_r, seg_g, seg_b);
         }
         
         // レジスタ書き込み量を線で表示（YM2151ラベルの下）
@@ -1411,7 +1642,7 @@ void Visualizer::renderChannelInfo() {
         int reg_bar_width = std::min((int)c.register_writes, max_reg_bar);
         if (reg_bar_width > 0) {
             SDL_SetRenderDrawColor(renderer_, seg_r / 2, seg_g / 2, seg_b / 2 + 60, 255);
-            SDL_Rect reg_bar = {10, seg_y + 28, reg_bar_width, 2};
+            SDL_Rect reg_bar = {10, seg_y + 38, reg_bar_width, 2};
             SDL_RenderFillRect(renderer_, &reg_bar);
         }
         
@@ -1419,7 +1650,7 @@ void Visualizer::renderChannelInfo() {
         int peak_bar_width = std::min((int)c.register_writes_peak, max_reg_bar);
         if (peak_bar_width > 0) {
             SDL_SetRenderDrawColor(renderer_, seg_r, seg_g, seg_b / 2 + 100, 255);
-            SDL_RenderDrawLine(renderer_, 10 + peak_bar_width, seg_y + 27, 10 + peak_bar_width, seg_y + 30);
+            SDL_RenderDrawLine(renderer_, 10 + peak_bar_width, seg_y + 37, 10 + peak_bar_width, seg_y + 40);
         }
         
         // キーオン状態で明るくする
@@ -1477,7 +1708,8 @@ void Visualizer::renderChannelInfo() {
             float base_level = (8184 - oper.eg_out) / 8184.0f;  // 0.0 ~ 1.0
             
             // AMSによる揺らぎを追加
-            float modulated_level = base_level * (1.0f + ams_modulation);
+            //float modulated_level = base_level * (1.0f + ams_modulation);
+            float modulated_level = base_level * (1.0f);
             if (modulated_level < 0.0f) modulated_level = 0.0f;
             if (modulated_level > 1.0f) modulated_level = 1.0f;
             
@@ -1587,7 +1819,9 @@ void Visualizer::renderChannelInfo() {
     }
     
     // ADPCMチャンネル (8-15) の表示
-    renderADPCMChannels(y);
+    if (adpcm_display_channels_ > 0) {
+        renderADPCMChannels(y);
+    }
 }
 
 void Visualizer::renderKeyboard() {
@@ -1601,8 +1835,8 @@ void Visualizer::renderKeyboard() {
     // 各チャンネルごとに鍵盤を縦に並べる
     // 8オクターブ（C0-C7）全域を表示 - YM2151のKCレジスタで設定可能な全範囲
     int start_x = KEYBOARD_START_X;
-    int start_y = 50;  // タイトル分のスペースを確保
-    int line_height = 70;  // チャンネル情報と同じ高さ
+    int start_y = YM2151_START_Y;
+    int line_height = YM2151_LINE_HEIGHT;
     int white_key_width = WHITE_KEY_WIDTH;
     int white_key_height = line_height - 15;
     int black_key_width = 6;
@@ -1614,7 +1848,8 @@ void Visualizer::renderKeyboard() {
     int waveform_height = line_height - 20;
     
     // FMチャンネルのみ鍵盤表示 (ADPCMは音程情報がないため表示しない)
-    for (int ch = 0; ch < 8; ch++) {
+    // 表示チャンネル数分だけ表示
+    for (int ch = 0; ch < ym2151_display_channels_; ch++) {
         auto& channel = channels[ch];
         
         // EGフェーズに基づく色を決定（全オペレータの中で最も進んでいるフェーズを使用）
@@ -1864,10 +2099,10 @@ void Visualizer::renderKeyboard() {
         int wave_r, wave_g, wave_b;
         getChannelColor(channel.algorithm, wave_r, wave_g, wave_b);
         
-        // 汎用波形描画関数を使用
+        // 汎用波形描画関数を使用（YM2151用のスケールを適用）
         renderChannelWaveform(waveform_x, base_y + 2, waveform_width, waveform_height,
                             waveform_data, YM2151State::CHANNEL_WAVEFORM_SIZE,
-                            wave_r, wave_g, wave_b);
+                            wave_r, wave_g, wave_b, ch, ym2151_waveform_scale_);
     }
 }
 
@@ -1918,7 +2153,7 @@ void Visualizer::renderWaveform() {
     }
 }
 
-void Visualizer::triggerNote(int midi_note, bool key_on) {
+void Visualizer::triggerNote(int midi_note, bool key_on, int velocity) {
     if (!opm_wrapper_) return;
     
     // OPMVisualizerラッパーを使用してレジスタを書き込む
@@ -1962,6 +2197,24 @@ void Visualizer::triggerNote(int midi_note, bool key_on) {
     // KC = (octave << 4) | note_in_octave
     uint8_t kc = ((octave & 0x07) << 4) | note_to_kc_table[note_in_octave];
     
+    // ベロシティに基づいてTLを調整
+    if (key_on) {
+        for (int op = 0; op < 4; op++) {
+            // プリセットTL値をベースに使用
+            uint8_t base_tl = channel_keys_[target_channel].preset_tl[op];
+            
+            // new_TL = (velocity - 96) / 96 * base_TL
+            // velocity 96で原音、127で減衰なし、0で最大減衰
+            int tl_offset = ((127 - velocity) * base_tl) / 96;
+            int new_tl = base_tl + tl_offset;
+            if (new_tl > 127) new_tl = 127;
+            if (new_tl < 0) new_tl = 0;
+            
+            // 0x60-0x7F: TL
+            wrapper->SetRegDirect(0x60 + (op << 3) + target_channel, new_tl);
+        }
+    }
+    
     // 選択されたチャンネルにKC (Key Code)を設定
     // レジスタ 0x28-0x2F: KC (Key Code)
     // SetRegDirect を使用してミュートをバイパス
@@ -1996,6 +2249,10 @@ void Visualizer::enterPolyphonicMode() {
     
     fprintf(stderr, "Entering polyphonic mode: copying ch%d settings to all channels\n", selected_channel_);
     
+    // 選択チャンネルのTL値を取得
+    YM2151State::Channel selected_ch_info;
+    state_->getChannelInfo(selected_channel_, selected_ch_info);
+    
     // 全チャンネルに現在のチャンネルのレジスタをコピー
     for (int ch = 0; ch < 8; ch++) {
         if (ch != selected_channel_) {
@@ -2005,6 +2262,11 @@ void Visualizer::enterPolyphonicMode() {
         channel_keys_[ch].active = false;
         channel_keys_[ch].midi_note = -1;
         channel_keys_[ch].key_on_time = 0;
+        
+        // プリセットTL値を保存（velocityのベース値）
+        for (int op = 0; op < 4; op++) {
+            channel_keys_[ch].preset_tl[op] = selected_ch_info.operators[op].total_level;
+        }
     }
 }
 
@@ -2012,7 +2274,7 @@ int Visualizer::findChannelForNote(int midi_note, bool key_on) {
     if (key_on) {
         // キーオン時: 同じノートを探す
         for (int ch = 0; ch < 8; ch++) {
-            if (channel_keys_[ch].active && channel_keys_[ch].midi_note == midi_note) {
+            if (channel_keys_[ch].midi_note == midi_note) {
                 return ch; // 同じノートを再トリガー
             }
         }
@@ -2083,4 +2345,266 @@ void Visualizer::copyChannelRegisters(int src_ch, int dst_ch) {
         // 0xE0-0xFF: D1L/RR
         wrapper->SetRegDirect(0xE0 + (op << 3) + dst_ch, src_op.sustain_level << 4 | src_op.release_rate);
     }
+}
+
+#ifdef __APPLE__
+// MIDI入力コールバック（C関数）
+static void MIDIReadCallback(const MIDIPacketList* packetList, void* readProcRefCon, void* srcConnRefCon) {
+    Visualizer* self = (Visualizer*)readProcRefCon;
+    const MIDIPacket* packet = &packetList->packet[0];
+    
+    for (UInt32 i = 0; i < packetList->numPackets; i++) {
+        Byte* data = (Byte*)packet->data;
+        UInt16 length = packet->length;
+        
+        if (length >= 3) {
+            Byte status = data[0] & 0xF0;
+            Byte note = data[1] & 0x7F;
+            Byte velocity = data[2] & 0x7F;
+            
+            if (status == 0x90 && velocity > 0) {
+                // Note On
+                self->triggerNote(note, true, velocity);
+            } else if (status == 0x80 || (status == 0x90 && velocity == 0)) {
+                // Note Off
+                self->triggerNote(note, false, 0);
+            }
+        }
+        
+        packet = MIDIPacketNext(packet);
+    }
+}
+
+void Visualizer::midiInputCallback(void* message, void* refCon) {
+    // Unused - kept for compatibility
+}
+
+bool Visualizer::initMIDI() {
+    MIDIClientRef client = 0;
+    MIDIPortRef port = 0;
+    
+    OSStatus status = MIDIClientCreate(CFSTR("mdx2wav"), NULL, NULL, &client);
+    if (status != noErr) {
+        fprintf(stderr, "Failed to create MIDI client: %d\n", (int)status);
+        return false;
+    }
+    
+    status = MIDIInputPortCreate(client, CFSTR("Input"), MIDIReadCallback, this, &port);
+    if (status != noErr) {
+        fprintf(stderr, "Failed to create MIDI input port: %d\n", (int)status);
+        MIDIClientDispose(client);
+        return false;
+    }
+    
+    // 全ての利用可能なMIDIソースに接続
+    ItemCount sourceCount = MIDIGetNumberOfSources();
+    if (sourceCount == 0) {
+        fprintf(stderr, "No MIDI sources found\n");
+        MIDIPortDispose(port);
+        MIDIClientDispose(client);
+        return false;
+    }
+    
+    fprintf(stderr, "Found %d MIDI source(s):\n", (int)sourceCount);
+    for (ItemCount i = 0; i < sourceCount; i++) {
+        MIDIEndpointRef source = MIDIGetSource(i);
+        CFStringRef name = NULL;
+        MIDIObjectGetStringProperty(source, kMIDIPropertyName, &name);
+        
+        if (name) {
+            char nameBuf[256];
+            CFStringGetCString(name, nameBuf, sizeof(nameBuf), kCFStringEncodingUTF8);
+            fprintf(stderr, "  [%d] %s\n", (int)i, nameBuf);
+            CFRelease(name);
+        }
+        
+        status = MIDIPortConnectSource(port, source, NULL);
+        if (status != noErr) {
+            fprintf(stderr, "Failed to connect to MIDI source %d: %d\n", (int)i, (int)status);
+        } else {
+            fprintf(stderr, "Connected to MIDI source %d\n", (int)i);
+        }
+    }
+    
+    midi_client_ = client;
+    midi_port_ = port;
+    
+    return true;
+}
+
+void Visualizer::shutdownMIDI() {
+    if (midi_port_) {
+        MIDIPortDispose(midi_port_);
+        midi_port_ = 0;
+    }
+    if (midi_client_) {
+        MIDIClientDispose(midi_client_);
+        midi_client_ = 0;
+    }
+}
+#else
+// Non-macOS platforms
+bool Visualizer::initMIDI() {
+    return false;
+}
+
+void Visualizer::shutdownMIDI() {
+}
+
+void Visualizer::midiInputCallback(void* message, void* refCon) {
+}
+#endif
+
+// プリセット保存
+bool Visualizer::saveChannelPreset(int preset_num) {
+    if (!state_ || preset_num < 1 || preset_num > 8) {
+        return false;
+    }
+    
+    // ファイル名を生成
+    char filename[256];
+    snprintf(filename, sizeof(filename), "ym2151_preset_%d.bin", preset_num);
+    
+    // チャンネル情報を取得
+    YM2151State::Channel ch_info;
+    state_->getChannelInfo(selected_channel_, ch_info);
+    
+    // ファイルに保存（バイナリ形式）
+    FILE* fp = fopen(filename, "wb");
+    if (!fp) {
+        return false;
+    }
+    
+    // ヘッダー（識別用）
+    const char header[] = "YM2151PR";
+    fwrite(header, 1, 8, fp);
+    
+    // バージョン
+    uint32_t version = 1;
+    fwrite(&version, sizeof(uint32_t), 1, fp);
+    
+    // チャンネル設定
+    fwrite(&ch_info.left_right, sizeof(uint8_t), 1, fp);
+    fwrite(&ch_info.feedback, sizeof(uint8_t), 1, fp);
+    fwrite(&ch_info.algorithm, sizeof(uint8_t), 1, fp);
+    fwrite(&ch_info.pms, sizeof(uint8_t), 1, fp);
+    fwrite(&ch_info.ams, sizeof(uint8_t), 1, fp);
+    
+    // 4オペレータ分のデータ
+    for (int op = 0; op < 4; op++) {
+        const auto& op_info = ch_info.operators[op];
+        fwrite(&op_info.detune1, sizeof(uint8_t), 1, fp);
+        fwrite(&op_info.multiple, sizeof(uint8_t), 1, fp);
+        fwrite(&op_info.total_level, sizeof(uint8_t), 1, fp);
+        fwrite(&op_info.key_scale, sizeof(uint8_t), 1, fp);
+        fwrite(&op_info.attack_rate, sizeof(uint8_t), 1, fp);
+        fwrite(&op_info.decay_rate, sizeof(uint8_t), 1, fp);
+        fwrite(&op_info.sustain_rate, sizeof(uint8_t), 1, fp);
+        fwrite(&op_info.sustain_level, sizeof(uint8_t), 1, fp);
+        fwrite(&op_info.release_rate, sizeof(uint8_t), 1, fp);
+        fwrite(&op_info.detune2, sizeof(uint8_t), 1, fp);
+    }
+    
+    fclose(fp);
+    return true;
+}
+
+// プリセット読み込み
+bool Visualizer::loadChannelPreset(int preset_num) {
+    if (!opm_wrapper_ || preset_num < 1 || preset_num > 8) {
+        return false;
+    }
+    
+    // ファイル名を生成
+    char filename[256];
+    snprintf(filename, sizeof(filename), "ym2151_preset_%d.bin", preset_num);
+    
+    // ファイルから読み込み
+    FILE* fp = fopen(filename, "rb");
+    if (!fp) {
+        return false;
+    }
+    
+    // ヘッダー確認
+    char header[8];
+    if (fread(header, 1, 8, fp) != 8 || memcmp(header, "YM2151PR", 8) != 0) {
+        fclose(fp);
+        return false;
+    }
+    
+    // バージョン確認
+    uint32_t version;
+    if (fread(&version, sizeof(uint32_t), 1, fp) != 1 || version != 1) {
+        fclose(fp);
+        return false;
+    }
+    
+    // チャンネル設定を読み込み
+    uint8_t left_right, feedback, algorithm, pms, ams;
+    fread(&left_right, sizeof(uint8_t), 1, fp);
+    fread(&feedback, sizeof(uint8_t), 1, fp);
+    fread(&algorithm, sizeof(uint8_t), 1, fp);
+    fread(&pms, sizeof(uint8_t), 1, fp);
+    fread(&ams, sizeof(uint8_t), 1, fp);
+    
+    // オペレータデータを読み込み
+    struct OpData {
+        uint8_t detune1, multiple, total_level, key_scale;
+        uint8_t attack_rate, decay_rate, sustain_rate;
+        uint8_t sustain_level, release_rate, detune2;
+    } op_data[4];
+    
+    for (int op = 0; op < 4; op++) {
+        fread(&op_data[op].detune1, sizeof(uint8_t), 1, fp);
+        fread(&op_data[op].multiple, sizeof(uint8_t), 1, fp);
+        fread(&op_data[op].total_level, sizeof(uint8_t), 1, fp);
+        fread(&op_data[op].key_scale, sizeof(uint8_t), 1, fp);
+        fread(&op_data[op].attack_rate, sizeof(uint8_t), 1, fp);
+        fread(&op_data[op].decay_rate, sizeof(uint8_t), 1, fp);
+        fread(&op_data[op].sustain_rate, sizeof(uint8_t), 1, fp);
+        fread(&op_data[op].sustain_level, sizeof(uint8_t), 1, fp);
+        fread(&op_data[op].release_rate, sizeof(uint8_t), 1, fp);
+        fread(&op_data[op].detune2, sizeof(uint8_t), 1, fp);
+    }
+    
+    fclose(fp);
+    
+    // 全チャンネルにレジスタを設定
+    OPMVisualizer* wrapper = (OPMVisualizer*)opm_wrapper_;
+    
+    for (int ch = 0; ch < 8; ch++) {
+        // 0x20-0x27: RL/FB/CON
+        wrapper->SetRegDirect(0x20 + ch, left_right | (feedback << 3) | algorithm);
+        
+        // 0x38-0x3F: PMS/AMS
+        wrapper->SetRegDirect(0x38 + ch, (pms << 4) | ams);
+        
+        // オペレータパラメータ
+        for (int op = 0; op < 4; op++) {
+            const auto& op_d = op_data[op];
+            
+            // 0x40-0x5F: DT1/MUL
+            wrapper->SetRegDirect(0x40 + (op << 3) + ch, (op_d.detune1 << 4) | op_d.multiple);
+            
+            // 0x60-0x7F: TL
+            wrapper->SetRegDirect(0x60 + (op << 3) + ch, op_d.total_level);
+            
+            // プリセットTL値を保存（velocityのベース値）
+            channel_keys_[ch].preset_tl[op] = op_d.total_level;
+            
+            // 0x80-0x9F: KS/AR
+            wrapper->SetRegDirect(0x80 + (op << 3) + ch, (op_d.key_scale << 6) | op_d.attack_rate);
+            
+            // 0xA0-0xBF: D1R
+            wrapper->SetRegDirect(0xA0 + (op << 3) + ch, op_d.decay_rate);
+            
+            // 0xC0-0xDF: DT2/D2R
+            wrapper->SetRegDirect(0xC0 + (op << 3) + ch, (op_d.detune2 << 6) | op_d.sustain_rate);
+            
+            // 0xE0-0xFF: D1L/RR
+            wrapper->SetRegDirect(0xE0 + (op << 3) + ch, (op_d.sustain_level << 4) | op_d.release_rate);
+        }
+    }
+    
+    return true;
 }

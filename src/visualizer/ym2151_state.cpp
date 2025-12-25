@@ -340,11 +340,11 @@ void YM2151State::updateADPCMWaveform(int ch, const int16_t* waveform, int size)
     if (ch < 0 || ch >= 8 || !waveform || size <= 0) return;
     
     pthread_mutex_lock(&mutex_);
-    int copy_size = std::min(size, 200);
+    int copy_size = std::min(size, 256);
     memcpy(adpcm_channels_[ch].waveform, waveform, copy_size * sizeof(int16_t));
     // 残りをゼロクリア
-    if (copy_size < 200) {
-        memset(adpcm_channels_[ch].waveform + copy_size, 0, (200 - copy_size) * sizeof(int16_t));
+    if (copy_size < 256) {
+        memset(adpcm_channels_[ch].waveform + copy_size, 0, (256 - copy_size) * sizeof(int16_t));
     }
     pthread_mutex_unlock(&mutex_);
 }
@@ -355,13 +355,9 @@ void YM2151State::getChannelWaveform(int ch, int16_t* out, int size) {
     pthread_mutex_lock(&mutex_);
     
     int copy_size = std::min(size, CHANNEL_WAVEFORM_SIZE);
-    int pos = channel_waveform_pos_[ch];
     
-    // 最新のデータから古いデータへ、リングバッファとして読み出す
-    for (int i = 0; i < copy_size; i++) {
-        int idx = (pos - copy_size + i + CHANNEL_WAVEFORM_SIZE) % CHANNEL_WAVEFORM_SIZE;
-        out[i] = channel_waveforms_[ch][idx];
-    }
+    // OPMから取得した波形データは既に線形配列なので、そのままコピー
+    memcpy(out, channel_waveforms_[ch], copy_size * sizeof(int16_t));
     
     pthread_mutex_unlock(&mutex_);
 }
@@ -421,6 +417,21 @@ void YM2151State::updateFromFmgen(void* opm_ptr) {
     for (int ch = 0; ch < 8; ch++) {
         FM::Channel4* fmch = opm->dbgGetCh(ch);
         if (!fmch) continue;
+        
+        // チャンネルが出力しているかチェック（全オペレータの状態を確認）
+        bool has_output = false;
+        for (int op = 0; op < 4; op++) {
+            // eg_outが低い値（音が出ている）ならhas_outputをtrueに
+            if (fmch->op[op].dbgGetEGOut() < 8000) {
+                has_output = true;
+                break;
+            }
+        }
+        
+        // 出力がない場合は波形バッファをゼロクリア
+        if (!has_output) {
+            memset(channel_waveforms_[ch], 0, sizeof(int16_t) * CHANNEL_WAVEFORM_SIZE);
+        }
         
         // 各オペレータのEG情報を取得
         for (int op = 0; op < 4; op++) {

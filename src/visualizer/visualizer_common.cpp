@@ -8,7 +8,8 @@
 // 汎用波形描画関数
 void Visualizer::renderChannelWaveform(int x, int y, int width, int height, 
                                         const int16_t* waveform_data, int sample_count,
-                                        int color_r, int color_g, int color_b) {
+                                        int color_r, int color_g, int color_b, int ch_id,
+                                        float waveform_scale) {
     // 波形の背景（暗い枠）
     SDL_SetRenderDrawColor(renderer_, 30, 30, 40, 255);
     SDL_Rect wave_bg = {x, y, width, height};
@@ -21,18 +22,86 @@ void Visualizer::renderChannelWaveform(int x, int y, int width, int height,
     SDL_SetRenderDrawColor(renderer_, 80, 80, 100, 128);
     SDL_RenderDrawLine(renderer_, x, center_y, x + width, center_y);
     
-    // 波形を描画（1サンプル = 1ピクセル）
+    // 波形を描画
     if (waveform_data && sample_count > 0) {
+        int start_offset = findStableWaveformOffset(waveform_data, sample_count, width, ch_id);
+        
         SDL_SetRenderDrawColor(renderer_, color_r, color_g, color_b, 255);
-        int samples_to_draw = std::min(width, sample_count);
+        int samples_to_draw = std::min(width, sample_count - start_offset);
         for (int i = 0; i < samples_to_draw - 1; i++) {
-            // 直接サンプルを使用（ダウンサンプリングなし）
-            int y1 = center_y - (waveform_data[i] * height / 2 / 32768);
-            int y2 = center_y - (waveform_data[i + 1] * height / 2 / 32768);
+            int y1 = center_y - (waveform_data[start_offset + i] * height * waveform_scale / 2 / 32768);
+            int y2 = center_y - (waveform_data[start_offset + i + 1] * height * waveform_scale / 2 / 32768);
             
             SDL_RenderDrawLine(renderer_, x + i, y1, x + i + 1, y2);
         }
+        
+        // 次フレーム用に現在の波形を保存
+        if (ch_id >= 0 && ch_id < MAX_CHANNELS && samples_to_draw > 0) {
+            int copy_size = std::min(samples_to_draw, 200);
+            memcpy(prev_waveform_[ch_id], waveform_data + start_offset, copy_size * sizeof(int16_t));
+            prev_waveform_offset_[ch_id] = start_offset;
+            has_prev_waveform_[ch_id] = true;
+        }
     }
+}
+
+// 位相安定化: 前フレームとの相関を最大化するオフセットを探す
+int Visualizer::findStableWaveformOffset(const int16_t* waveform_data, int sample_count, int width, int ch) {
+    if (!waveform_data || sample_count <= width || ch >= MAX_CHANNELS) {
+        return 0;
+    }
+    
+    // 探索範囲: バッファの後半から
+    int search_start = sample_count - width - 200;
+    if (search_start < 0) search_start = 0;
+    int search_end = sample_count - width;
+    if (search_end <= search_start) return 0;
+    
+    // 前フレームがない場合は、ゼロクロス検出
+    if (!has_prev_waveform_[ch]) {
+        for (int i = search_start; i < search_end - 1; i++) {
+            if (waveform_data[i] <= 0 && waveform_data[i + 1] > 0) {
+                return i + 1;
+            }
+        }
+        return search_start;
+    }
+    
+    // 前フレームとの相関を計算して最適なオフセットを見つける
+    int best_offset = prev_waveform_offset_[ch];
+    int64_t best_correlation = INT64_MIN;
+    
+    // 前回のオフセット周辺を重点的に探索（±300サンプル、低周波対応）
+    int search_range = 300;
+    int offset_start = std::max(search_start, prev_waveform_offset_[ch] - search_range);
+    int offset_end = std::min(search_end, prev_waveform_offset_[ch] + search_range);
+    
+    for (int offset = offset_start; offset < offset_end; offset++) {
+        // 相関を計算（フルwidth=256サンプルで比較、低周波対応）
+        int compare_len = std::min(256, width);
+        int64_t correlation = 0;
+        
+        for (int i = 0; i < compare_len; i++) {
+            correlation += (int64_t)waveform_data[offset + i] * (int64_t)prev_waveform_[ch][i];
+        }
+        
+        // より良い相関が見つかった場合
+        if (correlation > best_correlation) {
+            best_correlation = correlation;
+            best_offset = offset;
+        }
+    }
+    
+    // 相関が非常に低い場合（大きく変化した）、ゼロクロスで再初期化
+    if (best_correlation < 1000000) {
+        for (int i = search_start; i < search_end - 1; i++) {
+            if (waveform_data[i] <= 0 && waveform_data[i + 1] > 0) {
+                return i + 1;
+            }
+        }
+    }
+    
+    return best_offset;
 }
 
 // 7セグメント表示

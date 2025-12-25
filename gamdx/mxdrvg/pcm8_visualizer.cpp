@@ -78,21 +78,21 @@ void PCM8Visualizer::Mix(X68K::Sample* buffer, int ndata) {
                                           pcm.GetDmaMtc(), pcm.GetMode(), false);
             }
             
-            // リングバッファから最新の200サンプルを取得
+            // リングバッファから最新の256サンプルを取得
             const int16_t* ring_buffer = GetChannelWaveform(ch);
             int current_pos = GetChannelWaveformPos(ch);
-            int16_t channel_waveform[200];
+            int16_t channel_waveform[256];
             
-            // リングバッファの現在位置から逆算して最新200サンプルを取得
-            // 現在位置が256なので、200サンプル前から取得
-            for (int i = 0; i < 200; i++) {
-                // リングバッファの位置計算：現在位置から200サンプル戻る
-                int ring_pos = (current_pos - 200 + i) & 255;
+            // リングバッファの現在位置から逆算して最新256サンプルを取得
+            // 現在位置が256なので、256サンプル前から取得（1周分）
+            for (int i = 0; i < 256; i++) {
+                // リングバッファの位置計算：現在位置から256サンプル戻る
+                int ring_pos = (current_pos - 256 + i) & 255;
                 channel_waveform[i] = ring_buffer[ring_pos];
             }
             
             // 波形データを更新
-            state_->updateADPCMWaveform(ch, channel_waveform, 200);
+            state_->updateADPCMWaveform(ch, channel_waveform, 256);
         }
     }
 }

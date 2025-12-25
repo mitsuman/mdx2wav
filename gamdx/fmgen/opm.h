@@ -163,14 +163,14 @@ namespace FM
 		int InpOpm_prev2[2];
 		int OpmHpfInp[2];
 		int OpmHpfInp_prev[2];
-		int OpmHpfOut[2];;
+		int OpmHpfOut[2];
 
 	public:
 		int		dbgGetOpOut(int c, int s) { return ch[c].op[s].dbgopout_; }
 		Channel4* dbgGetCh(int c) { return &ch[c]; }
 		
 		// チャンネル波形バッファ
-		static const int CHANNEL_WAVEFORM_BUFFER_SIZE = 256;
+		static const int CHANNEL_WAVEFORM_BUFFER_SIZE = 1024; // should be same as YM2151State::CHANNEL_WAVEFORM_SIZE
 		void dbgGetChannelWaveform(int ch, int16* out, int size);
 		
 	private:

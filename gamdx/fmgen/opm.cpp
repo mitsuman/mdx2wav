@@ -539,7 +539,7 @@ inline void OPM::MixSubL(int activech, ISample** idest)
 	channel_waveform_buffer_[2][channel_waveform_pos_[2]] = (int16)(output > 32767 ? 32767 : (output < -32768 ? -32768 : output));
 	channel_waveform_pos_[2] = (channel_waveform_pos_[2] + 1) % CHANNEL_WAVEFORM_BUFFER_SIZE;
 	
-	if (activech & 0x0400) {
+	if (activech & 0x0100) {
 		output = ch[3].CalcL();
 		*idest[3] += output;
 	} else {

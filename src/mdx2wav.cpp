@@ -88,10 +88,24 @@ bool read_file(const char *name, int *fsize, u8 **fdata, int offset) {
 std::vector<std::string> listMDXFiles(const char* filepath) {
   std::vector<std::string> files;
   
-  // ディレクトリパスを取得
-  std::string path(filepath);
-  size_t last_slash = path.find_last_of('/');
-  std::string dir_path = (last_slash != std::string::npos) ? path.substr(0, last_slash) : ".";
+  // まず、パスがディレクトリかファイルかを確認
+  struct stat path_stat;
+  if (stat(filepath, &path_stat) != 0) {
+    return files;
+  }
+  
+  std::string dir_path;
+  bool is_directory = S_ISDIR(path_stat.st_mode);
+  
+  if (is_directory) {
+    // ディレクトリが直接指定された場合
+    dir_path = filepath;
+  } else {
+    // ファイルが指定された場合、そのディレクトリを取得
+    std::string path(filepath);
+    size_t last_slash = path.find_last_of('/');
+    dir_path = (last_slash != std::string::npos) ? path.substr(0, last_slash) : ".";
+  }
   
   DIR* dir = opendir(dir_path.c_str());
   if (!dir) {
@@ -278,7 +292,12 @@ void help() {
     "  -f        : enable fadeout.\n"
 #ifdef ENABLE_VISUALIZER
     "  -g        : enable visualizer (requires SDL2).\n"
+    "  --video <file>      : save as video file (e.g., output.mp4). Uses -d/-l for duration.\n"
+    "  --video-fps <n>     : set video framerate (default:60).\n"
     "  --screenshot <file> : save screenshot and exit immediately.\n"
+    "  --ym2151-ch <n>     : set number of YM2151 channels to display (1-8, default:8).\n"
+    "  --adpcm-ch <n>      : set number of ADPCM channels to display (1-8, default:8).\n"
+    "  --waveform-scale <n>: set waveform amplitude scale (0.1-10.0, default:1.0).\n"
 #endif
     "  -l <loop> : set loop limit. (default:2)\n"
     "  -m        : measure play time as sec.\n"
@@ -291,12 +310,22 @@ void help() {
     "               mdx2wav -t xxx.mdx | iconv -f SHIFT-JIS -t utf-8\n"
     "  -v        : print version.\n"
     "  -V        : verbose, write debug log to stderr.\n"
+    "  --volume <n>        : set volume multiplier (0.0-2.0, default:1.0).\n"
+    "  --swap-channels     : swap left/right audio channels.\n"
     );
 }
 
 
 
 int main(int argc, char **argv) {
+  // Check for -h or --help anywhere in arguments first
+  for (int i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+      help();
+      return 0;
+    }
+  }
+  
   int MDX_BUF_SIZE = 256 * 1024;
   int PDX_BUF_SIZE = 1024 * 1024;
   int SAMPLE_RATE = 44100;
@@ -306,7 +335,15 @@ int main(int argc, char **argv) {
   bool get_title = false;
   bool play_audio = false;
   bool enable_visualizer = false;
+  bool swap_channels = false;
+  float volume = 1.0f;
+  float ym2151_waveform_scale = 1.0f;
+  float adpcm_waveform_scale = 1.0f;
   const char* screenshot_filename = nullptr;
+  const char* video_filename = nullptr;
+  int video_fps = 60;
+  int ym2151_channels = 8;
+  int adpcm_channels = 8;
   float max_song_duration = 300.0f;
   int loop = 2;
   int fadeout = 0;
@@ -315,10 +352,148 @@ int main(int argc, char **argv) {
   int opt;
   // Handle long options
   for (int i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) {
+    if (strcmp(argv[i], "--video") == 0 && i + 1 < argc) {
+#ifdef ENABLE_VISUALIZER
+      video_filename = argv[i + 1];
+      enable_visualizer = true;
+      // Remove these args from argv
+      for (int j = i; j < argc - 2; j++) {
+        argv[j] = argv[j + 2];
+      }
+      argc -= 2;
+      i--;
+#else
+      fprintf(stderr, "Visualizer support is not enabled.\n");
+      return -1;
+#endif
+    } else if (strcmp(argv[i], "--video-fps") == 0 && i + 1 < argc) {
+#ifdef ENABLE_VISUALIZER
+      video_fps = atoi(argv[i + 1]);
+      if (video_fps < 1 || video_fps > 120) {
+        fprintf(stderr, "Video FPS must be between 1 and 120.\n");
+        return -1;
+      }
+      // Remove these args from argv
+      for (int j = i; j < argc - 2; j++) {
+        argv[j] = argv[j + 2];
+      }
+      argc -= 2;
+      i--;
+#else
+      fprintf(stderr, "Visualizer support is not enabled.\n");
+      return -1;
+#endif
+    } else if (strcmp(argv[i], "--screenshot") == 0 && i + 1 < argc) {
 #ifdef ENABLE_VISUALIZER
       screenshot_filename = argv[i + 1];
       enable_visualizer = true;
+      // Remove these args from argv
+      for (int j = i; j < argc - 2; j++) {
+        argv[j] = argv[j + 2];
+      }
+      argc -= 2;
+      i--;
+#else
+      fprintf(stderr, "Visualizer support is not enabled.\n");
+      return -1;
+#endif
+    } else if (strcmp(argv[i], "--swap-channels") == 0) {
+      swap_channels = true;
+      // Remove this arg from argv
+      for (int j = i; j < argc - 1; j++) {
+        argv[j] = argv[j + 1];
+      }
+      argc--;
+      i--;
+    } else if (strcmp(argv[i], "--volume") == 0 && i + 1 < argc) {
+      volume = atof(argv[i + 1]);
+      if (volume < 0.0f || volume > 2.0f) {
+        fprintf(stderr, "Volume must be between 0.0 and 2.0.\n");
+        return -1;
+      }
+      // Remove these args from argv
+      for (int j = i; j < argc - 2; j++) {
+        argv[j] = argv[j + 2];
+      }
+      argc -= 2;
+      i--;
+    } else if (strcmp(argv[i], "--ym2151-ch") == 0 && i + 1 < argc) {
+#ifdef ENABLE_VISUALIZER
+      ym2151_channels = atoi(argv[i + 1]);
+      if (ym2151_channels < 1 || ym2151_channels > 8) {
+        fprintf(stderr, "YM2151 channels must be between 1 and 8.\n");
+        return -1;
+      }
+      // Remove these args from argv
+      for (int j = i; j < argc - 2; j++) {
+        argv[j] = argv[j + 2];
+      }
+      argc -= 2;
+      i--;
+#else
+      fprintf(stderr, "Visualizer support is not enabled.\n");
+      return -1;
+#endif
+    } else if (strcmp(argv[i], "--adpcm-ch") == 0 && i + 1 < argc) {
+#ifdef ENABLE_VISUALIZER
+      adpcm_channels = atoi(argv[i + 1]);
+      if (adpcm_channels < 0 || adpcm_channels > 8) {
+        fprintf(stderr, "ADPCM channels must be between 0 and 8.\n");
+        return -1;
+      }
+      // Remove these args from argv
+      for (int j = i; j < argc - 2; j++) {
+        argv[j] = argv[j + 2];
+      }
+      argc -= 2;
+      i--;
+#else
+      fprintf(stderr, "Visualizer support is not enabled.\n");
+      return -1;
+#endif
+    } else if (strcmp(argv[i], "--ym2151-waveform-scale") == 0 && i + 1 < argc) {
+#ifdef ENABLE_VISUALIZER
+      ym2151_waveform_scale = atof(argv[i + 1]);
+      if (ym2151_waveform_scale < 0.1f || ym2151_waveform_scale > 10.0f) {
+        fprintf(stderr, "YM2151 waveform scale must be between 0.1 and 10.0.\n");
+        return -1;
+      }
+      // Remove these args from argv
+      for (int j = i; j < argc - 2; j++) {
+        argv[j] = argv[j + 2];
+      }
+      argc -= 2;
+      i--;
+#else
+      fprintf(stderr, "Visualizer support is not enabled.\n");
+      return -1;
+#endif
+    } else if (strcmp(argv[i], "--adpcm-waveform-scale") == 0 && i + 1 < argc) {
+#ifdef ENABLE_VISUALIZER
+      adpcm_waveform_scale = atof(argv[i + 1]);
+      if (adpcm_waveform_scale < 0.1f || adpcm_waveform_scale > 10.0f) {
+        fprintf(stderr, "ADPCM waveform scale must be between 0.1 and 10.0.\n");
+        return -1;
+      }
+      // Remove these args from argv
+      for (int j = i; j < argc - 2; j++) {
+        argv[j] = argv[j + 2];
+      }
+      argc -= 2;
+      i--;
+#else
+      fprintf(stderr, "Visualizer support is not enabled.\n");
+      return -1;
+#endif
+    } else if (strcmp(argv[i], "--waveform-scale") == 0 && i + 1 < argc) {
+#ifdef ENABLE_VISUALIZER
+      float scale = atof(argv[i + 1]);
+      if (scale < 0.1f || scale > 10.0f) {
+        fprintf(stderr, "Waveform scale must be between 0.1 and 10.0.\n");
+        return -1;
+      }
+      ym2151_waveform_scale = scale;
+      adpcm_waveform_scale = scale;
       // Remove these args from argv
       for (int j = i; j < argc - 2; j++) {
         argv[j] = argv[j + 2];
@@ -385,11 +560,32 @@ int main(int argc, char **argv) {
 
   int AUDIO_BUF_SAMPLES = SAMPLE_RATE / 100; // 10ms
 
+  // Check for conflicting options
+  if (play_audio && video_filename) {
+    fprintf(stderr, "Error: -p and --video options cannot be used together.\n");
+    return -1;
+  }
+
   const char *mdx_name = argv[optind];
   if (mdx_name == 0 || *mdx_name == 0) {
     help();
     return 0;
   }
+  
+  // ディレクトリが指定された場合の処理（ビジュアライザー無効時）
+#ifndef ENABLE_VISUALIZER
+  struct stat path_stat;
+  if (stat(mdx_name, &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) {
+    std::vector<std::string> file_list = listMDXFiles(mdx_name);
+    if (!file_list.empty()) {
+      mdx_name = file_list[0].c_str();
+      fprintf(stderr, "Directory specified. Playing first file: %s\n", mdx_name);
+    } else {
+      fprintf(stderr, "No MDX files found in directory: %s\n", mdx_name);
+      return -1;
+    }
+  }
+#endif
 
   if (0 == strcmp(ym2151_type, "fmgen")) {
   } else if (0 == strcmp(ym2151_type, "mame")) {
@@ -415,27 +611,75 @@ int main(int argc, char **argv) {
     // ディレクトリ内のMDXファイルを列挙
     file_list = listMDXFiles(mdx_name);
     
-    // 現在のファイルのインデックスを見つける
-    std::string current_file(mdx_name);
-    for (size_t i = 0; i < file_list.size(); i++) {
-      if (file_list[i] == current_file) {
-        current_file_index = i;
-        break;
+    // ディレクトリが指定された場合、最初のファイルを再生
+    struct stat path_stat;
+    if (stat(mdx_name, &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) {
+      if (!file_list.empty()) {
+        mdx_name = file_list[0].c_str();
+        current_file_index = 0;
+        fprintf(stderr, "Directory specified. Playing first file: %s\n", mdx_name);
+      } else {
+        fprintf(stderr, "No MDX files found in directory: %s\n", mdx_name);
+        return -1;
+      }
+    } else {
+      // 現在のファイルのインデックスを見つける
+      std::string current_file(mdx_name);
+      for (size_t i = 0; i < file_list.size(); i++) {
+        if (file_list[i] == current_file) {
+          current_file_index = i;
+          break;
+        }
       }
     }
     
     // YM2151状態管理オブジェクト作成
     ym_state = new YM2151State();
     
+    // ウィンドウの高さを計算（表示チャンネル数に応じて調整）
+    // タイトル: 50px, Timer情報: 15px, 区切り線: 10px = 75px
+    // YM2151チャンネル: 70px/ch
+    // ADPCMチャンネル: 45px/ch
+    // 下部余白: 20px
+    int window_height = 75 + (ym2151_channels * 70) + (adpcm_channels * 45) + 20;
+    
+    // 動画モードの場合は高さを偶数に調整（H.264要件）
+    if (video_filename && (window_height % 2) != 0) {
+      window_height++;
+    }
+    
     // ビジュアライザー初期化
     visualizer = new Visualizer();
-    if (!visualizer->init("MDX Visualizer", 1100, 970)) {
-      fprintf(stderr, "Failed to initialize visualizer\n");
-      delete visualizer;
-      delete ym_state;
-      return -1;
+    bool init_success = false;
+    
+    if (video_filename) {
+      // 動画録画モード
+      init_success = visualizer->initVideoMode(video_filename, 1100, window_height, video_fps, SAMPLE_RATE);
+      if (!init_success) {
+        fprintf(stderr, "Failed to initialize visualizer in video mode\n");
+        delete visualizer;
+        delete ym_state;
+        return -1;
+      }
+      fprintf(stderr, "Video recording mode: %s (%dfps)\n", video_filename, video_fps);
+    } else {
+      // 通常の表示モード
+      init_success = visualizer->init("MDX Visualizer", 1100, window_height);
+      if (!init_success) {
+        fprintf(stderr, "Failed to initialize visualizer\n");
+        delete visualizer;
+        delete ym_state;
+        return -1;
+      }
     }
+    
     visualizer->setState(ym_state);
+    
+    // 表示チャンネル数を設定
+    visualizer->setDisplayChannels(ym2151_channels, adpcm_channels);
+    
+    // 波形スケールを設定
+    visualizer->setWaveformScale(ym2151_waveform_scale, adpcm_waveform_scale);
     
     // ファイルリストを設定
     if (!file_list.empty()) {
@@ -565,9 +809,10 @@ reload_file:
   }
 
   // ビジュアライザー使用時は曲の長さ制限を無効化（手動終了またはファイル切り替えまで再生継続）
+  // ただし、動画録画モードの場合は-d/-lで指定された制限を使用
 #ifdef ENABLE_VISUALIZER
-  if (enable_visualizer) {
-    song_duration = 0.0f;  // 無制限
+  if (enable_visualizer && !video_filename) {
+    song_duration = 0.0f;  // 無制限（通常ビジュアライザー）
   } else
 #endif
   {
@@ -577,8 +822,16 @@ reload_file:
   }
 
   // Main loop
+  double total_audio_time = 0.0;  // 動画モード用: 累積オーディオ時間
+  int video_frames_rendered = 0;   // 動画モード用: レンダリング済みフレーム数
+  
   for (int i = 0; song_duration == 0.0f || 1.0f * i * AUDIO_BUF_SAMPLES / SAMPLE_RATE < song_duration; i++) {
 #ifdef ENABLE_VISUALIZER
+    // 動画モード: 累積オーディオ時間で正確に制御
+    if (video_filename && song_duration > 0.0f && total_audio_time >= song_duration) {
+      break;
+    }
+    
     // fmgenからEG情報を更新
     if (enable_visualizer && ym_state && opm_original) {
       void* opm_ptr = opm_original->GetOPMPointer();
@@ -592,7 +845,8 @@ reload_file:
     }
     
     // Update visualizer (must be on main thread for macOS)
-    if (enable_visualizer && visualizer) {
+    if (enable_visualizer && visualizer && !video_filename) {
+      // 通常モード: 既存の処理
       // MXDRVGの一時停止状態を適用
       static bool last_pause_state = false;
       bool current_pause_state = visualizer->isMXDRVGPaused();
@@ -606,32 +860,43 @@ reload_file:
       }
       
       visualizer->update();
-      
-      // ファイル切り替え要求をチェック
-      if (visualizer->hasFileChangeRequest()) {
-        int new_index = visualizer->getRequestedFileIndex();
-        if (new_index >= 0 && new_index < (int)file_list.size()) {
-          mdx_name = file_list[new_index].c_str();
-          current_file_index = new_index;
-          visualizer->clearFileChangeRequest();
+        
+        // 曲の再スタート要求をチェック
+        if (visualizer->hasRestartRequest()) {
+          visualizer->clearRestartRequest();
           
-          // 再生を停止して新しいファイルをロード
-          fprintf(stderr, "\nSwitching to: %s\n", mdx_name);
-          // ファイル切り替え時は完全にリセット
+          // 現在の曲を頭から再生
+          fprintf(stderr, "\nRestarting song: %s\n", mdx_name);
           MXDRVG_End();
           goto reload_file;
         }
-      }
-      
-      if (!visualizer->isRunning()) {
-        break;
-      }
+        
+        // ファイル切り替え要求をチェック
+        if (visualizer->hasFileChangeRequest()) {
+          int new_index = visualizer->getRequestedFileIndex();
+          if (new_index >= 0 && new_index < (int)file_list.size()) {
+            mdx_name = file_list[new_index].c_str();
+            current_file_index = new_index;
+            visualizer->clearFileChangeRequest();
+            
+            // 再生を停止して新しいファイルをロード
+            fprintf(stderr, "\nSwitching to: %s\n", mdx_name);
+            // ファイル切り替え時は完全にリセット
+            MXDRVG_End();
+            goto reload_file;
+          }
+        }
+        
+        if (!visualizer->isRunning()) {
+          break;
+        }
     }
 #endif
 
     // ビジュアライザー使用時は曲の終了を無視（ファイル切り替えや手動終了まで継続）
+    // ただし動画録画モードの場合は曲終了を検知して停止
 #ifdef ENABLE_VISUALIZER
-    if (!enable_visualizer)
+    if (!enable_visualizer || video_filename)
 #endif
     {
       if (MXDRVG_GetTerminated()) {
@@ -657,19 +922,75 @@ reload_file:
     }
 #endif
 
-    // File output mode
-    int len = MXDRVG_GetPCM(audio_buf, AUDIO_BUF_SAMPLES);
+    // File output mode or video mode
+    // 動画モード: song_durationを超えないように必要なサンプル数を計算
+    int samples_to_get = AUDIO_BUF_SAMPLES;
+#ifdef ENABLE_VISUALIZER
+    if (video_filename && song_duration > 0.0f) {
+      double remaining_time = song_duration - total_audio_time;
+      if (remaining_time <= 0.0) {
+        break;  // 既に指定時間に達している
+      }
+      int remaining_samples = (int)(remaining_time * SAMPLE_RATE);
+      if (remaining_samples < samples_to_get) {
+        samples_to_get = remaining_samples;
+      }
+    }
+#endif
+    
+    int len = MXDRVG_GetPCM(audio_buf, samples_to_get);
     if (len <= 0) {
       break;
     }
 
+    // Swap left/right channels if requested
+    if (swap_channels) {
+      for (int i = 0; i < len; i++) {
+        short temp = audio_buf[i * 2];
+        audio_buf[i * 2] = audio_buf[i * 2 + 1];
+        audio_buf[i * 2 + 1] = temp;
+      }
+    }
+
+    // Apply volume adjustment
+    if (volume != 1.0f) {
+      for (int i = 0; i < len * 2; i++) {
+        int sample = (int)(audio_buf[i] * volume);
+        // Clamp to prevent overflow
+        if (sample > 32767) sample = 32767;
+        else if (sample < -32768) sample = -32768;
+        audio_buf[i] = (short)sample;
+      }
+    }
+
 #ifdef ENABLE_VISUALIZER
+    // 動画録画モード: オーディオサンプルを先に更新してからフレームをレンダリング
     if (enable_visualizer && visualizer) {
       visualizer->updateWaveform(audio_buf, len);
+      
+      if (video_filename) {
+        // 動画モード: オーディオ時間を累積
+        total_audio_time += (double)len / SAMPLE_RATE;
+        
+        // 次のビデオフレームをレンダリングする時刻を計算
+        double next_frame_time = (video_frames_rendered + 1) / (double)video_fps;
+        
+        // オーディオ時間が次のフレーム時刻を超えた場合、フレームをレンダリング
+        while (total_audio_time >= next_frame_time) {
+          if (!visualizer->renderVideoFrame()) {
+            break;  // エンコードエラー発生
+          }
+          video_frames_rendered++;
+          next_frame_time = (video_frames_rendered + 1) / (double)video_fps;
+        }
+      }
     }
 #endif
 
-    fwrite(audio_buf, len, 4, stdout);
+    // 動画録画モード以外の場合のみファイル出力
+    if (!video_filename) {
+      fwrite(audio_buf, len, 4, stdout);
+    }
   }
 
 #ifdef __APPLE__

@@ -43,25 +43,25 @@ public:
 
     struct TimerState
     {
-        uint16_t timer_a;        // Timer A period (0-1023)
-        uint8_t timer_b;         // Timer B period (0-255)
-        int32_t timer_a_count;   // Timer A counter
-        int32_t timer_b_count;   // Timer B counter
-        bool timer_a_enable;     // Timer A enabled
-        bool timer_b_enable;     // Timer B enabled
-        uint8_t status;          // Status register
+        uint16_t timer_a;      // Timer A period (0-1023)
+        uint8_t timer_b;       // Timer B period (0-255)
+        int32_t timer_a_count; // Timer A counter
+        int32_t timer_b_count; // Timer B counter
+        bool timer_a_enable;   // Timer A enabled
+        bool timer_b_enable;   // Timer B enabled
+        uint8_t status;        // Status register
     };
 
     struct ADPCMChannel
     {
-        bool key_on;              // 再生中かどうか
-        uint8_t volume;           // 音量 (0-15)
-        uint32_t rate;            // サンプリングレート
+        bool key_on;               // 再生中かどうか
+        uint8_t volume;            // 音量 (0-15)
+        uint32_t rate;             // サンプリングレート
         uintptr_t initial_address; // 初回キーオン時のアドレス（色の決定に使用）
-        uintptr_t address;        // 現在の再生アドレス（ポインタサイズ）
-        uint32_t length;          // データ長
-        uint8_t mode;             // モード (ADPCMの種類など)
-        int16_t waveform[200];    // 波形データ（YM2151と同じサイズ）
+        uintptr_t address;         // 現在の再生アドレス（ポインタサイズ）
+        uint32_t length;           // データ長
+        uint8_t mode;              // モード (ADPCMの種類など)
+        int16_t waveform[256];     // 波形データ
     };
 
     struct Channel
@@ -82,12 +82,12 @@ public:
         Operator operators[4]; // 4つのオペレータ (M1, C1, M2, C2)
 
         // ビジュアライザー用のエンベロープ表示
-        float display_volume;      // 表示用の音量 (0.0-1.0, 減衰していく)
-        float peak_volume;         // ピーク音量 (0.0-1.0)
-        uint64_t last_update_time; // 最後の更新時刻（ミリ秒）
-        uint32_t register_writes;  // レジスタ書き込み量 (バイト数)
+        float display_volume;          // 表示用の音量 (0.0-1.0, 減衰していく)
+        float peak_volume;             // ピーク音量 (0.0-1.0)
+        uint64_t last_update_time;     // 最後の更新時刻（ミリ秒）
+        uint32_t register_writes;      // レジスタ書き込み量 (バイト数)
         uint32_t register_writes_peak; // レジスタ書き込み量のピーク
-        uint32_t peak_hold_frames; // ピークホールド残りフレーム数
+        uint32_t peak_hold_frames;     // ピークホールド残りフレーム数
     };
 
     YM2151State();
@@ -108,9 +108,9 @@ public:
 
     // ADPCMチャンネル情報の更新
     void updateADPCMChannel(int ch, bool key_on, uint8_t volume, uint32_t rate, uintptr_t address, uint32_t length, uint8_t mode, bool is_initial_keyon = false);
-    
+
     // ADPCM波形の更新
-    void updateADPCMWaveform(int ch, const int16_t* waveform, int size);
+    void updateADPCMWaveform(int ch, const int16_t *waveform, int size);
 
     // ADPCM全体バッファ情報の設定
     void setADPCMBufferInfo(void *buffer, uint32_t size);
@@ -121,16 +121,16 @@ public:
 
     // LFO状態の取得（スレッドセーフ）
     void getLFOState(LFOState &out);
-    
+
     // Timer状態の取得（スレッドセーフ）
     void getTimerState(TimerState &out);
-    
+
     // Timer Bのトグル（opm_ptrはOPMチップへのポインタ）
-    void toggleTimerB(void* opm_ptr);
+    void toggleTimerB(void *opm_ptr);
 
     // チャンネル波形の取得（スレッドセーフ）
-    static const int CHANNEL_WAVEFORM_SIZE = 200;
-    void getChannelWaveform(int ch, int16_t* out, int size);
+    static const int CHANNEL_WAVEFORM_SIZE = 800;
+    void getChannelWaveform(int ch, int16_t *out, int size);
 
     // レジスタ書き込みカウンタのリセット（フレーム毎に呼ぶ）
     void resetRegisterWriteCounts();
@@ -153,9 +153,9 @@ private:
     void *adpcm_buffer_;
     uint32_t adpcm_buffer_size_;
 
-    // チャンネル波形バッファ（各チャンネル200サンプル）
-    int16_t channel_waveforms_[8][200];
-    int channel_waveform_pos_[8];
+    // チャンネル波形バッファ（各チャンネル800サンプル）
+    int16_t channel_waveforms_[8][800];
+    int channel_waveform_pos_[8];  // 未使用（互換性のため残す）
 
     // ノート番号を計算 (KC/KF -> MIDI note)
     void updateNote(int ch);

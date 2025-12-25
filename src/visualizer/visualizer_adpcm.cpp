@@ -16,7 +16,8 @@ void Visualizer::renderADPCMChannels(int& y) {
     
     int adpcm_line_height = 45;  // ADPCMは縦に詰める
     
-    for (int ch = 8; ch < 16; ch++) {
+    // ADPCMチャンネル (8-15) - 表示チャンネル数分だけ表示
+    for (int ch = 8; ch < 8 + adpcm_display_channels_; ch++) {
         int adpcm_ch = ch - 8;
         YM2151State::ADPCMChannel& ac = adpcm_channels[adpcm_ch];
         
@@ -36,45 +37,50 @@ void Visualizer::renderADPCMChannels(int& y) {
                 peak.peak_volume = ac.volume;
             }
         } else {
-            // キーオフ後、徐々にピークを減衰
+            // キーオフ後も表示を維持（リセットしない）
+            // ピークボリュームのみ徐々に減衰させて透明度を調整
             if (peak.peak_volume > 0) {
-                // 30フレーム（約0.5秒）でピークをゼロに
                 uint32_t frames_since_keyon = frame_count_ - peak.keyon_time;
-                if (frames_since_keyon > 30) {
-                    peak.peak_volume = 0;
-                    peak.keyon_time = 0;
-                    peak.start_address = 0;
-                    peak.end_address = 0;
+                // 300フレーム（約5秒）後から徐々にピーク音量を減らす
+                if (frames_since_keyon > 300) {
+                    int decay_frames = frames_since_keyon - 300;
+                    if (decay_frames < 60) {
+                        // 60フレーム（約1秒）かけて音量を0に
+                        peak.peak_volume = peak.peak_volume * (60 - decay_frames) / 60;
+                    } else {
+                        peak.peak_volume = 0;
+                    }
                 }
             }
         }
         
         // 7セグメント表示でチャンネル番号を表示
         int seg_x = 20;
-        int seg_y = y + 10;
+        int seg_y = y + 5;
         int seg_w = 8;
         int seg_h = 7;
         
-        // チャンネル情報は固定色（オレンジ）
-        int seg_r, seg_g, seg_b;
-        if (ac.key_on) {
-            seg_r = 255;
-            seg_g = 180;
-            seg_b = 100;
-        } else {
-            seg_r = 120;
-            seg_g = 80;
-            seg_b = 40;
-        }
+        // チャンネル情報の色（YM2151と同じオレンジ色）
+        // キーオン時は明るく、キーオフ時は暗く
+        int seg_r = ac.key_on ? CHANNEL_LABEL_COLOR_ACTIVE_R : CHANNEL_LABEL_COLOR_INACTIVE_R;
+        int seg_g = ac.key_on ? CHANNEL_LABEL_COLOR_ACTIVE_G : CHANNEL_LABEL_COLOR_INACTIVE_G;
+        int seg_b = ac.key_on ? CHANNEL_LABEL_COLOR_ACTIVE_B : CHANNEL_LABEL_COLOR_INACTIVE_B;
         
         // チャンネル番号を7セグメント表示 (8-15 を 0-7 として表示)
         draw7Segment(seg_x, seg_y, adpcm_ch, seg_r, seg_g, seg_b, seg_w, seg_h);
         
-        // "ADPCM"ラベルを表示（チャンネル番号の下）
+        // "OKI"ラベルを表示（チャンネル番号の下、MSM6258の上）
         if (bitmap_font_texture_) {
-            renderBitmapText("ADPCM", 13, seg_y + 18, seg_r, seg_g, seg_b);
+            renderBitmapText("OKI", 10, seg_y + 18, seg_r, seg_g, seg_b);
         } else if (font_sm) {
-            renderText(renderer_, font_sm, "ADPCM", 13, seg_y + 16, seg_r, seg_g, seg_b);
+            renderText(renderer_, font_sm, "OKI", 10, seg_y + 18, seg_r, seg_g, seg_b);
+        }
+        
+        // "MSM6258"ラベルを表示（OKIの下）
+        if (bitmap_font_texture_) {
+            renderBitmapText("MSM6258", 10, seg_y + 26, seg_r, seg_g, seg_b);
+        } else if (font_sm) {
+            renderText(renderer_, font_sm, "MSM6258", 10, seg_y + 26, seg_r, seg_g, seg_b);
         }
         
         // 音量バーを縦方向に表示 (YM2151スタイル)
@@ -116,23 +122,34 @@ void Visualizer::renderADPCMChannels(int& y) {
         }
         
         // 現在の音量表示（アドレスベースの色）
-        if (ac.key_on && ac.volume > 0) {
-            float vol_ratio = 1.0f;//ac.volume / 15.0f;  // 0-15を0.0-1.0に
-            int vol_h = (int)(vol_ratio * vol_height);
+        // キーオン時は実音量、キーオフ時はピーク音量を使用
+        if (peak.start_address > 0 && ac.key_on) {
+            // キーオン時は現在の音量、キーオフ時はピーク音量
+            int display_volume = ac.key_on ? ac.volume : peak.peak_volume;
             
-            // ボリュームバーはアドレスから色を生成
-            int vol_r, vol_g, vol_b;
-            if (peak.start_address > 0) {
-                getColorFromAddress(peak.start_address, vol_r, vol_g, vol_b);
-            } else {
-                vol_r = 255;
-                vol_g = 180;
-                vol_b = 100;
+            // 音量が0の場合は表示しない
+            if (display_volume > 0) {
+                float vol_ratio = 1.0f;//display_volume / 15.0f;  // 0-15を0.0-1.0に
+
+                int vol_h = (int)(vol_ratio * vol_height);
+                if (vol_h > 0) {
+                    // ボリュームバーはアドレスから色を生成
+                    int vol_r, vol_g, vol_b;
+                    getColorFromAddress(peak.start_address, vol_r, vol_g, vol_b);
+                    
+                    // キーオフ時は色を暗くしてアルファも下げる
+                    if (!ac.key_on) {
+                        vol_r = vol_r * 4 / 10;
+                        vol_g = vol_g * 4 / 10;
+                        vol_b = vol_b * 4 / 10;
+                    }
+                    
+                    int alpha = ac.key_on ? 255 : 150;
+                    SDL_SetRenderDrawColor(renderer_, vol_r, vol_g, vol_b, alpha);
+                    SDL_Rect vol_rect = {vol_x, vol_y + vol_height - vol_h, vol_width, vol_h};
+                    SDL_RenderFillRect(renderer_, &vol_rect);
+                }
             }
-            
-            SDL_SetRenderDrawColor(renderer_, vol_r, vol_g, vol_b, 255);
-            SDL_Rect vol_rect = {vol_x, vol_y + vol_height - vol_h, vol_width, vol_h};
-            SDL_RenderFillRect(renderer_, &vol_rect);
         }
         
         // 音量バーの枠
@@ -145,7 +162,9 @@ void Visualizer::renderADPCMChannels(int& y) {
         // アドレス範囲とLEN（サンプル長）を横方向のバーで可視化
         int len_x = 85;
         int len_y = y + 8;
-        int len_max_width = 400;  // 最大表示幅
+        // キーボード表示の右端（820）まで伸ばす
+        int keyboard_end_x = KEYBOARD_START_X + OCTAVE_COUNT * WHITE_KEY_WIDTH;  // 820
+        int len_max_width = keyboard_end_x - len_x;  // 735
         int len_height = 6;       // バーの高さ
 
         void* adpcm_buffer = state_->getADPCMBuffer();
@@ -164,19 +183,25 @@ void Visualizer::renderADPCMChannels(int& y) {
             SDL_SetRenderDrawColor(renderer_, 80, 80, 90, 255);
             SDL_RenderDrawRect(renderer_, &total_rect);
             
-            if (ac.key_on && ac.address >= peak.start_address) {
+            // キーオン時もキーオフ時も表示（キーオフ時は暗くする）
+            if (ac.address >= peak.start_address || !ac.key_on) {
                 // 現在の再生位置（相対位置）
-                uint32_t current_offset = ac.address - peak.start_address;
-                float position_ratio = 1.0f - (float)current_offset / (float)total_length;
-                float vol = ac.volume / 16.0f;
+                uint32_t current_offset = ac.key_on ? (ac.address - peak.start_address) : 0;
+                float position_ratio = 1.0f;
+                float vol = (ac.key_on ? ac.volume : peak.peak_volume) / 16.0f;
+                if (ac.key_on && total_length > 0) {
+                    position_ratio = 1.0f - (float)current_offset / (float)total_length;
+                }
+                if (ac.key_on==false) position_ratio = 0.0f;
                 if (vol > 1.0f) vol = 1.0f;
                 position_ratio *= vol;  // 音量に応じて位置を調整
                 if (position_ratio > 1.0f) position_ratio = 1.0f;
                 
-                // 再生残り部分（明るいオレンジ）
+                // 再生残り部分（明るいオレンジ、キーオフ時は暗く）
                 int played_width = (int)(position_ratio * len_max_width);
                 if (played_width > 0) {
-                    SDL_SetRenderDrawColor(renderer_, seg_r, seg_g, seg_b, 255);
+                    int alpha = ac.key_on ? 255 : 80;
+                    SDL_SetRenderDrawColor(renderer_, seg_r, seg_g, seg_b, alpha);
                     SDL_Rect played_rect = {len_x, len_y, played_width, len_height};
                     SDL_RenderFillRect(renderer_, &played_rect);
                 }
@@ -184,7 +209,8 @@ void Visualizer::renderADPCMChannels(int& y) {
                 // 現在位置のマーカー（白い縦線）
                 if (1) {
                     int vol_pos = (int)(vol * len_max_width);
-                    SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 255);
+                    int alpha = ac.key_on ? 255 : 80;
+                    SDL_SetRenderDrawColor(renderer_, 255, 255, 255, alpha);
                     SDL_RenderDrawLine(renderer_, len_x + vol_pos, len_y , 
                                       len_x + vol_pos, len_y + len_height-1);
                 }
@@ -192,11 +218,9 @@ void Visualizer::renderADPCMChannels(int& y) {
             
             // アドレス情報をテキスト表示（初回/現在の両方）
             char addr_text[128];
-            if (ac.key_on) {
-                float progress = 0.0f;
-                if (ac.address >= peak.start_address && total_length > 0) {
-                    progress = ((float)(ac.address - peak.start_address) / (float)total_length) * 100.0f;
-                }
+            float progress = 0.0f;
+            if (ac.key_on && ac.address >= peak.start_address && total_length > 0) {
+                progress = ((float)(ac.address - peak.start_address) / (float)total_length) * 100.0f;
                 snprintf(addr_text, sizeof(addr_text), "I:%08X C:%08X (%3.0f%%)", 
                         (unsigned long)ac.initial_address-(unsigned long)adpcm_buffer, (unsigned long)ac.address-(unsigned long)adpcm_buffer, progress);
             } else {
@@ -204,7 +228,11 @@ void Visualizer::renderADPCMChannels(int& y) {
                         (unsigned long)peak.start_address-(unsigned long)adpcm_buffer, (unsigned long)peak.start_address-(unsigned long)adpcm_buffer);
             }
             
-            renderBitmapText(addr_text, len_x, len_y + len_height + 2, seg_r, seg_g, seg_b);
+            // キーオフ時は色を暗くして表示
+            int text_r = ac.key_on ? seg_r : seg_r / 2;
+            int text_g = ac.key_on ? seg_g : seg_g / 2;
+            int text_b = ac.key_on ? seg_b : seg_b / 2;
+            renderBitmapText(addr_text, len_x, len_y + len_height + 2, text_r, text_g, text_b);
         } else if (ac.key_on && ac.length > 0) {
             // まだ起点が記録されていない場合は従来の表示
             char len_text[32];
@@ -212,13 +240,14 @@ void Visualizer::renderADPCMChannels(int& y) {
             renderBitmapText(len_text, len_x, len_y, seg_r, seg_g, seg_b);
         }
         
-        // 全体ADPCMバッファ内での位置を可視化        
-        if (adpcm_buffer && adpcm_buffer_size > 0 && ac.key_on && ac.address > 0) {
+        // 全体ADPCMバッファ内での位置を可視化（キーオフ時も表示）
+        if (adpcm_buffer && adpcm_buffer_size > 0 && (ac.key_on || peak.start_address > 0)) {
             uintptr_t buffer_start = reinterpret_cast<uintptr_t>(adpcm_buffer);
             uintptr_t buffer_end = buffer_start + adpcm_buffer_size;
             
-            // 現在のアドレスが全体バッファ内にあるか確認
-            if (ac.address >= buffer_start && ac.address < buffer_end) {
+            // 現在のアドレスまたはピークアドレスが全体バッファ内にあるか確認
+            uintptr_t display_addr = ac.key_on ? ac.address : peak.start_address;
+            if (display_addr >= buffer_start && display_addr < buffer_end) {
                 int global_bar_x = len_x;
                 int global_bar_y = len_y + 16;
                 int global_bar_width = len_max_width;
@@ -230,20 +259,22 @@ void Visualizer::renderADPCMChannels(int& y) {
                 SDL_RenderFillRect(renderer_, &global_bg);
                 
                 {
-                    uintptr_t offset_in_buffer = ac.initial_address - buffer_start;
+                    uintptr_t initial_addr = ac.key_on ? ac.initial_address : peak.start_address;
+                    uintptr_t offset_in_buffer = initial_addr - buffer_start;
                     float global_position = (float)offset_in_buffer / (float)adpcm_buffer_size;
                     if (global_position > 1.0f) global_position = 1.0f;
                     int marker_x = global_bar_x + (int)(global_position * global_bar_width);
 
-                    // マーカー（明るい青）
-                    SDL_SetRenderDrawColor(renderer_, 100, 180, 200, 255);
+                    // マーカー（明るい青、キーオフ時は暗く）
+                    int alpha = ac.key_on ? 255 : 100;
+                    SDL_SetRenderDrawColor(renderer_, 100, 180, 200, alpha);
                     SDL_RenderDrawLine(renderer_, marker_x, global_bar_y, marker_x, global_bar_y + global_bar_height);
                     SDL_RenderDrawLine(renderer_, marker_x - 1, global_bar_y, marker_x - 1, global_bar_y + global_bar_height);
                     SDL_RenderDrawLine(renderer_, marker_x + 1, global_bar_y, marker_x + 1, global_bar_y + global_bar_height);
                 }
 
                 // 現在の再生位置（全体バッファ内での相対位置）
-                uintptr_t offset_in_buffer = ac.address - buffer_start;
+                uintptr_t offset_in_buffer = display_addr - buffer_start;
                 float global_position = (float)offset_in_buffer / (float)adpcm_buffer_size;
                 if (global_position > 1.0f) global_position = 1.0f;
                 
@@ -287,13 +318,13 @@ void Visualizer::renderADPCMChannels(int& y) {
             int color_r, color_g, color_b;
             getColorFromAddress((unsigned long)ac.initial_address, color_r, color_g, color_b);
             
-            // 汎用波形描画関数を使用
+            // 汎用波形描画関数を使用（ADPCM用のスケールを適用）
             renderChannelWaveform(waveform_x, waveform_y, waveform_width, waveform_height,
-                                ac.waveform, 200, color_r, color_g, color_b);
+                                ac.waveform, CHANNEL_WAVEFORM_WIDTH, color_r, color_g, color_b, 8 + adpcm_ch, adpcm_waveform_scale_);
         } else {
             // キーオフ時は空の波形枠のみ表示
             renderChannelWaveform(waveform_x, waveform_y, waveform_width, waveform_height,
-                                nullptr, 0, 60, 60, 80);
+                                nullptr, 0, 60, 60, 80, 8 + adpcm_ch, adpcm_waveform_scale_);
         }
         
         y += adpcm_line_height;
