@@ -2774,22 +2774,24 @@ void Visualizer::renderSpectrum() {
         fprintf(spectrum_debug_file_, "=== Frame %d ===\n", spectrum_debug_frame_count_);
     }
     
-    // YM2151チャンネルごとにスペクトラムを描画
+    // YM2151チャンネルごとにスペクトラムを描画（各チャンネル波形と同じ位置/高さ）
     for (int ch = 0; ch < ym2151_display_channels_; ch++) {
-        int y = SPECTRUM_START_Y + ch * YM2151_LINE_HEIGHT;
-        int spectrum_height = YM2151_LINE_HEIGHT - 10;
+        int base_y = SPECTRUM_START_Y + ch * YM2151_LINE_HEIGHT;
+        int spectrum_y = base_y + 2;                  // waveformと同じオフセット
+        int spectrum_height = YM2151_LINE_HEIGHT - 20; // waveformと同じ高さ
         
-        renderSpectrumSection(SPECTRUM_X, y, SPECTRUM_WIDTH, spectrum_height,
-                      spectrum_analyzers_[ch], ch, do_debug);
+        renderSpectrumSection(SPECTRUM_X, spectrum_y, SPECTRUM_WIDTH, spectrum_height,
+                              spectrum_analyzers_[ch], ch, do_debug);
     }  // for each YM2151 channel
     
     // ADPCMチャンネル用のスペクトラム
     if (adpcm_display_channels_ > 0) {
         int adpcm_start_y = SPECTRUM_START_Y + ym2151_display_channels_ * YM2151_LINE_HEIGHT;
         for (int ch = 0; ch < adpcm_display_channels_ && ch < 8; ch++) {
-            int y = adpcm_start_y + ch * ADPCM_LINE_HEIGHT;
-            int spectrum_height = ADPCM_LINE_HEIGHT - 5;
-            renderSpectrumSection(SPECTRUM_X, y, SPECTRUM_WIDTH, spectrum_height,
+            int base_y = adpcm_start_y + ch * ADPCM_LINE_HEIGHT;
+            int spectrum_y = base_y + 8;                    // ADPCM波形と同位置
+            int spectrum_height = ADPCM_LINE_HEIGHT - 8;    // waveformと同じ高さ
+            renderSpectrumSection(SPECTRUM_X, spectrum_y, SPECTRUM_WIDTH, spectrum_height,
                                   spectrum_analyzers_[8 + ch], 8 + ch, do_debug);
         }
     }
