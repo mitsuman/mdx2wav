@@ -20,8 +20,6 @@
 
 // 波形表示用のバッファサイズ
 static const int WAVEFORM_BUFFER_SIZE = 2048;
-static const int SPECTRUM_BAR_WIDTH = 3;
-static const int SPECTRUM_BAR_SPACING = 1;
 
 // 内部実装用の構造体
 struct VisualizerImpl {
@@ -2701,7 +2699,7 @@ void Visualizer::renderSpectrumSection(int x, int y, int width, int height,
     }
 
     SDL_Rect bg = {x, y, width, height};
-    SDL_SetRenderDrawColor(renderer_, 30, 30, 30, 255);
+    SDL_SetRenderDrawColor(renderer_, 18, 20, 28, 255);
     SDL_RenderFillRect(renderer_, &bg);
 
     bool output_debug = write_debug && spectrum_debug_file_ && channel_index >= 0;
@@ -2714,27 +2712,50 @@ void Visualizer::renderSpectrumSection(int x, int y, int width, int height,
         fprintf(spectrum_debug_file_, "\n");
     }
 
-    int num_bars = SpectrumAnalyzer::NUM_BARS;
-    int total_bar_width = (SPECTRUM_BAR_WIDTH + SPECTRUM_BAR_SPACING) * num_bars - SPECTRUM_BAR_SPACING;
-    int start_x = x + (width - total_bar_width) / 2;
+    const int bin_count = analyzer->getBinCount();
+    if (bin_count <= 0 || width <= 0 || height <= 4) {
+        SDL_SetRenderDrawColor(renderer_, 100, 100, 100, 255);
+        SDL_RenderDrawRect(renderer_, &bg);
+        return;
+    }
 
-    for (int bar = 0; bar < num_bars; bar++) {
-        float magnitude = analyzer->getMagnitude(bar);
-        int bar_height = (int)(magnitude * (height - 4));
-        if (bar_height <= 0) {
+    const int vertical_margin = 2;
+    const int drawable_height = height - vertical_margin * 2;
+    const int baseline = y + height - vertical_margin;
+
+    // 目安となる水平グリッド
+    SDL_SetRenderDrawColor(renderer_, 50, 52, 65, 255);
+    for (int i = 1; i <= 4; ++i) {
+        int grid_y = y + vertical_margin + (drawable_height * i) / 5;
+        SDL_RenderDrawLine(renderer_, x, grid_y, x + width - 1, grid_y);
+    }
+
+    auto sampleMagnitude = [&](float normalized) {
+        float bin_pos = normalized * (bin_count - 1);
+        int base_bin = static_cast<int>(bin_pos);
+        float frac = bin_pos - base_bin;
+        float mag0 = analyzer->getMagnitude(base_bin);
+        float mag1 = analyzer->getMagnitude(std::min(base_bin + 1, bin_count - 1));
+        return mag0 + (mag1 - mag0) * frac;
+    };
+
+    for (int column = 0; column < width; ++column) {
+        float normalized = (width > 1) ? static_cast<float>(column) / static_cast<float>(width - 1) : 0.0f;
+        float magnitude = sampleMagnitude(normalized);
+        int column_height = static_cast<int>(magnitude * drawable_height);
+        if (column_height <= 0) {
             continue;
         }
 
-        int bar_x = start_x + bar * (SPECTRUM_BAR_WIDTH + SPECTRUM_BAR_SPACING);
-        int bar_y = y + height - bar_height - 2;
+        column_height = std::min(column_height, drawable_height);
+        int column_top = std::max(baseline - column_height, y + vertical_margin);
 
-        int r = 140;
-        int g = 200;
-        int b = 255;
-
+        float intensity = std::min(1.0f, magnitude);
+        Uint8 r = static_cast<Uint8>(std::min(255.0f, 80.0f + intensity * 360.0f));
+        Uint8 g = static_cast<Uint8>(std::min(255.0f, 140.0f + intensity * 220.0f));
+        Uint8 b = static_cast<Uint8>(std::min(255.0f, 200.0f + intensity * 140.0f));
         SDL_SetRenderDrawColor(renderer_, r, g, b, 255);
-        SDL_Rect bar_rect = {bar_x, bar_y, SPECTRUM_BAR_WIDTH, bar_height};
-        SDL_RenderFillRect(renderer_, &bar_rect);
+        SDL_RenderDrawLine(renderer_, x + column, baseline, x + column, column_top);
     }
 
     SDL_SetRenderDrawColor(renderer_, 100, 100, 100, 255);

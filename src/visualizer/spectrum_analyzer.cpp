@@ -46,37 +46,28 @@ void SpectrumAnalyzer::performFFT() {
     // FFT実行
     fft(fft_real_, fft_imag_, FFT_SIZE);
     
-    // 周波数ビンを対数スケールでバーに変換
-    int bins_per_bar = (FFT_SIZE / 2) / NUM_BARS;
-    for (int bar = 0; bar < NUM_BARS; bar++) {
-        float sum = 0.0f;
-        int start_bin = bar * bins_per_bar;
-        int end_bin = start_bin + bins_per_bar;
-        
-        for (int bin = start_bin; bin < end_bin && bin < FFT_SIZE / 2; bin++) {
-            float magnitude = sqrtf(fft_real_[bin] * fft_real_[bin] + 
-                                   fft_imag_[bin] * fft_imag_[bin]);
-            sum += magnitude;
-        }
-        
-        magnitudes_[bar] = sum / bins_per_bar;
-        
+    // FFT結果を各周波数ビンごとに保存
+    for (int bin = 0; bin < NUM_BINS; bin++) {
+        float magnitude = sqrtf(fft_real_[bin] * fft_real_[bin] +
+                               fft_imag_[bin] * fft_imag_[bin]);
+        magnitudes_[bin] = magnitude;
+
         // スムージング
-        smoothed_magnitudes_[bar] = smoothed_magnitudes_[bar] * SMOOTHING_FACTOR +
-                                   magnitudes_[bar] * (1.0f - SMOOTHING_FACTOR);
+        smoothed_magnitudes_[bin] = smoothed_magnitudes_[bin] * SMOOTHING_FACTOR +
+                                    magnitude * (1.0f - SMOOTHING_FACTOR);
     }
 }
 
-float SpectrumAnalyzer::getMagnitude(int bar_index) const {
-    if (bar_index < 0 || bar_index >= NUM_BARS) {
+float SpectrumAnalyzer::getMagnitude(int bin_index) const {
+    if (bin_index < 0 || bin_index >= NUM_BINS) {
         return 0.0f;
     }
     
     // スムージングされた振幅を取得
-    float magnitude = smoothed_magnitudes_[bar_index];
+    float magnitude = smoothed_magnitudes_[bin_index];
     
     // FFTの結果をスケーリング（感度を適度に調整）
-    magnitude = magnitude * 3.0f;  // 10.0から3.0に減らす
+    magnitude = magnitude * 6.0f;
     
     // 対数スケールで視認性向上
     if (magnitude > 0.001f) {
