@@ -244,6 +244,7 @@ private:
     int16_t prev_waveform_[MAX_CHANNELS][200];
     int prev_waveform_offset_[MAX_CHANNELS];
     bool has_prev_waveform_[MAX_CHANNELS];
+    float waveform_dynamic_scale_[MAX_CHANNELS];
     
     // スペクトラムアナライザ（チャンネルごと）
     static const int NUM_SPECTRUM_ANALYZERS = 16;  // YM2151(8) + ADPCM(8)

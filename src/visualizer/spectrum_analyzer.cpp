@@ -66,16 +66,16 @@ float SpectrumAnalyzer::getMagnitude(int bin_index) const {
     // スムージングされた振幅を取得
     float magnitude = smoothed_magnitudes_[bin_index];
     
-    // FFTの結果をスケーリング（感度を適度に調整）
-    magnitude = magnitude * 6.0f;
-    
-    // 対数スケールで視認性向上
-    if (magnitude > 0.001f) {
-        magnitude = std::pow(magnitude, 0.7f);  // 0.6から0.7に調整
-    }
+    // 対数スケール（dB）に変換して視認性を確保
+    const float kMinDb = -60.0f;       // 下限（人間が感じにくいレベル）
+    const float kReference = 1.0f;     // 0dB基準
+    const float epsilon = 1e-6f;
+
+    float magnitude_db = 20.0f * log10f(std::max(magnitude / kReference, epsilon));
+    float normalized = (magnitude_db - kMinDb) / -kMinDb;  // kMinDb～0dBを0～1へ
     
     // 0.0～1.0の範囲にクランプ
-    return std::max(0.0f, std::min(1.0f, magnitude));
+    return std::max(0.0f, std::min(1.0f, normalized));
 }
 
 void SpectrumAnalyzer::hamming_window(float* data, int n) {

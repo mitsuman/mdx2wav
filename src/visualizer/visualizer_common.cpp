@@ -4,6 +4,7 @@
 #include <SDL_ttf.h>
 #include <cstdio>
 #include <algorithm>
+#include <cmath>
 
 // 汎用波形描画関数
 void Visualizer::renderChannelWaveform(int x, int y, int width, int height, 
@@ -28,9 +29,43 @@ void Visualizer::renderChannelWaveform(int x, int y, int width, int height,
         
         SDL_SetRenderDrawColor(renderer_, color_r, color_g, color_b, 255);
         int samples_to_draw = std::min(width, sample_count - start_offset);
+        float adaptive_scale = waveform_scale;
+
+        if (ch_id >= 0 && ch_id < MAX_CHANNELS && samples_to_draw > 0) {
+            const float TARGET_OCCUPANCY = 0.92f;
+            const float MIN_AUTO_SCALE = 0.2f;
+            const float MAX_AUTO_SCALE = 8.0f;
+            const float SILENCE_THRESHOLD = 0.0025f;
+            const float ATTACK = 0.45f;   // 瞬間的なピークには素早く反応
+            const float RELEASE = 0.08f;  // 静かなパッセージではゆっくり追従
+
+            float peak = 0.0f;
+            for (int i = 0; i < samples_to_draw; i++) {
+                float sample = std::abs(waveform_data[start_offset + i]) / 32768.0f;
+                if (sample > peak) {
+                    peak = sample;
+                }
+            }
+
+            float desired_auto = waveform_dynamic_scale_[ch_id];
+            if (peak > SILENCE_THRESHOLD) {
+                desired_auto = TARGET_OCCUPANCY / peak;
+                if (desired_auto < MIN_AUTO_SCALE) desired_auto = MIN_AUTO_SCALE;
+                if (desired_auto > MAX_AUTO_SCALE) desired_auto = MAX_AUTO_SCALE;
+            } else {
+                // 無音付近ではスケールをゆっくり持ち上げるだけに留める
+                desired_auto = std::min(MAX_AUTO_SCALE, desired_auto * 1.01f + 0.01f);
+            }
+
+            float current_auto = waveform_dynamic_scale_[ch_id];
+            float lerp = (desired_auto < current_auto) ? ATTACK : RELEASE;
+            current_auto += (desired_auto - current_auto) * lerp;
+            waveform_dynamic_scale_[ch_id] = current_auto;
+            adaptive_scale = waveform_scale * current_auto;
+        }
         for (int i = 0; i < samples_to_draw - 1; i++) {
-            int y1 = center_y - (waveform_data[start_offset + i] * height * waveform_scale / 2 / 32768);
-            int y2 = center_y - (waveform_data[start_offset + i + 1] * height * waveform_scale / 2 / 32768);
+            int y1 = center_y - (waveform_data[start_offset + i] * height * adaptive_scale / 2 / 32768);
+            int y2 = center_y - (waveform_data[start_offset + i + 1] * height * adaptive_scale / 2 / 32768);
             
             SDL_RenderDrawLine(renderer_, x + i, y1, x + i + 1, y2);
         }

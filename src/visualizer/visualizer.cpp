@@ -101,6 +101,7 @@ Visualizer::Visualizer()
         memset(prev_waveform_[i], 0, sizeof(prev_waveform_[i]));
         prev_waveform_offset_[i] = 0;
         has_prev_waveform_[i] = false;
+        waveform_dynamic_scale_[i] = 1.0f;
     }
 }
 
