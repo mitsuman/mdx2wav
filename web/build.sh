@@ -61,19 +61,17 @@ PORTS_FLAGS=(
 )
 
 COMMON_FLAGS=(
-  -O0   # -O1/-O2 miscompile the MXDRVG copy loop (see web/README.md)
+  -O2
   -g
   -Wno-deprecated-declarations
   -Wno-writable-strings
   -DENABLE_VISUALIZER
-  -DMDXWEB_SAFE_RENDER
-  -DMDXWEB_NO_ADPCM_WAVE
   -I"$ROOT"
 )
 CXX_FLAGS=(-std=c++11)
 
 LINK_FLAGS=(
-  -O0
+  -O2
   -pthread
   -sPTHREAD_POOL_SIZE=8
   -sALLOW_MEMORY_GROWTH=1

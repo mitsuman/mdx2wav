@@ -2461,6 +2461,22 @@ static void L0005f8(
 	a1_l = (uint32_t *)A1; a0_l = (uint32_t *)A0;
 	D1 >>= 2;
 
+	// The 68000 tolerates the unaligned longword access this loop performs, but
+	// the C translation does not: reading or writing a uint32_t through a
+	// misaligned pointer is undefined behaviour, and a compiler that exploits it
+	// (clang -O1/-O2, for example) generates code that traps on WebAssembly.
+	// Both the driver's own buffers and the pointers it is handed are normally
+	// 4 byte aligned, so fall back to a byte copy only when they are not.
+	if (((uintptr_t)A1 & 3) != 0 || ((uintptr_t)A0 & 3) != 0) {
+		ULONG n = D1 * 4 + D0;
+		while (n-- != 0) {
+			*(A0++) = *(A1++);
+		}
+		*(A2) = SET;
+		D0 = 0;
+		return;
+	}
+
 // L000610:;
 /*
 														swap.w  d1

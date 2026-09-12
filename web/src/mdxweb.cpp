@@ -109,6 +109,15 @@ int mdxweb_init(int ym2151_channels, int adpcm_channels, float waveform_scale,
                 int width, int height) {
   // Diagnostics must reach the browser console even if the engine aborts.
   setvbuf(stderr, nullptr, _IONBF, 0);
+
+  // Scratch buffer for one 10 ms chunk.  The visualizer is handed g_audio.data()
+  // on every step, so it has to hold storage from the very first frame; leaving
+  // it to mdxweb_main() left the pointer null and silently disabled the
+  // spectrum analyzers.
+  if (g_audio.empty()) {
+    g_audio.resize(CHUNK_SAMPLES * 2);
+  }
+
   if (!E) {
     E = new MDXEngine();
   }
@@ -355,11 +364,12 @@ void mdxweb_set_callbacks(const WebCallbacks* cb) {
 EMSCRIPTEN_KEEPALIVE
 int mdxweb_audio_chunk_bytes() { return CHUNK_SAMPLES * 2 * sizeof(short); }
 
+// Kept so the exported symbol list stays stable; the scratch buffer is sized in
+// mdxweb_init().
 EMSCRIPTEN_KEEPALIVE
 int mdxweb_main(int argc, char** argv) {
   (void)argc;
   (void)argv;
-  g_audio.resize(CHUNK_SAMPLES * 2);
   return 0;
 }
 

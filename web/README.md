@@ -6,7 +6,8 @@ driven from JavaScript, so an MDX file plays with both sound *and* the animated
 visualizer in a normal web page.
 
 The result is bit-for-bit identical to the native `mdx2wav` output for the first
-seconds of playback (see "Verification" below).
+seconds of playback (see "Verification" below), and the engine runs about 21x
+faster than real time.
 
 ```
 open http://127.0.0.1:8099/   →  MHAWK3.MDX plays with the visualizer
@@ -74,38 +75,37 @@ Then:
 
 ### Compiler flags worth knowing
 
-* **`-O0` is required.** `-O1`/`-O2` miscompile the MXDRVG block copy loop: the
-  driver's `L0005f8` performs unaligned 32-bit loads from the MDX data, and the
-  optimiser turns the resulting undefined behaviour into a trapping
-  `unreachable`. The native build gets away with it because x86 tolerates
-  unaligned access. `-O0` is still ~7× faster than real time, which is plenty.
+* **`-O2` is the default.** The engine runs at roughly 21× real time on a laptop
+  at `-O2` (about 7× at `-O0`). Reaching `-O2` required fixing real undefined
+  behaviour in the shared sources — see "Source changes outside `web/`" below;
+  before those fixes the optimiser turned it into a trapping `unreachable`.
 * `-sSTACK_SIZE` / `-sDEFAULT_PTHREAD_STACK_SIZE` are set to 32 MB. The
   visualiser keeps large `YM2151State::Channel` arrays on the stack.
 * `-pthread` + `-sPTHREAD_POOL_SIZE=8`. Emscripten needs a worker thread to run
   `main` so that SDL2 can own the browser main thread.
-* `-DMDXWEB_SAFE_RENDER` / `-DMDXWEB_NO_ADPCM_WAVE` select bounds-checked
-  variants of two visualiser drawing paths (see below).
 
 ## Source changes outside `web/`
 
-Two small, guarded changes were made to the shared visualiser sources so the
-browser build cannot trap on out-of-bounds reads. The native build is
-unaffected (`./build/mdx2wav` output is unchanged).
+Three fixes were made to the shared sources. They are plain bug fixes, not
+browser-only workarounds, and the native build is unaffected.
 
-* `src/visualizer/visualizer_common.cpp`
-  * `findStableWaveformOffset()` now clamps its correlation window to the end of
-    the sample buffer. It walks `waveform_data[offset + i]` with `i` up to 255
-    while `offset` is derived from the previous frame, which could read past a
-    short (256 sample) ADPCM buffer.
-  * `renderChannelWaveform()` gained a `MDXWEB_SAFE_RENDER` branch: a simple,
-    bounds-checked waveform drawing routine used by the browser build.
-* `src/visualizer/visualizer_adpcm.cpp`
-  * the ADPCM waveform trace is skipped under `MDXWEB_NO_ADPCM_WAVE` (the empty
-    waveform frame is still drawn). The correlation-based path reads past the
-    256-sample ADPCM buffer in WebAssembly.
-
-Both web-only paths still draw a live waveform; only the phase-stabilising
-correlation offset is given up.
+* `src/visualizer/visualizer.cpp` — `getColorFromAddress()`
+  * **This is what blocked `-O1`/`-O2`.** It computed
+    `address ^ (address >> 32)`, but `uintptr_t` is 32 bits wide on wasm32, so
+    that shift is by the full width of the type — undefined behaviour. clang at
+    `-O1`/`-O2` replaces the function with `unreachable`, so the engine trapped
+    as soon as an ADPCM channel with a non-zero address was drawn. The shift is
+    now only done when `sizeof(uintptr_t) > 4`; the high half is zero on 32-bit
+    targets anyway, and 64-bit builds (the native binary) keep the exact
+    original colours.
+  * `r1`/`g1`/`b1` are also initialised before the hue branch, so the
+    `(r1 + m)` arithmetic can never read an indeterminate value.
+* `gamdx/mxdrvg/mxdrvg_core.h` — `L0005f8()` (the driver's block copy)
+  * the loop casts the source and destination to `uint32_t *` and dereferences
+    them. The 68000 tolerates unaligned longword access and x86 tolerates it
+    too, but the C is undefined behaviour and traps on WebAssembly. It now falls
+    back to a byte copy when either pointer is not 4-byte aligned; every buffer
+    the driver normally uses is aligned, so the fast path is unaffected.
 
 ## Files
 
@@ -189,4 +189,7 @@ gets it from malloc rounding).
   shows a "click to start" overlay for this.
 * The video-recording (`--video`), screenshot and spectrum-debug options of the
   native tool are not exposed in the browser; FFmpeg is stubbed out.
-* The engine is built at `-O0` for the reason described above.
+* The native binary is not bit-reproducible across runs: a handful of samples
+  (~5 of 88200 in the first second) depend on uninitialised heap contents. The
+  browser build starts from zeroed buffers, so its output is deterministic — and
+  is what the comparison in `web/verify.js` is anchored to.

@@ -996,9 +996,20 @@ static int getOperatorOutputDistance(int algorithm, int op) {
 // アドレス値から色を生成（HSV色空間で色相を変えて同じ明るさの色を生成）
 void Visualizer::getColorFromAddress(uintptr_t address, int& r, int& g, int& b) {
     // アドレスをハッシュ化して0-31の範囲に
-    uint32_t hash = (uint32_t)(address ^ (address >> 32));
+    //
+    // On a 64 bit target mix in the high half.  The original wrote
+    // `address ^ (address >> 32)` unconditionally, but uintptr_t is only 32 bits
+    // wide on wasm32, so that shift is by the full width of the type: undefined
+    // behaviour that an optimising compiler may turn into a trap (clang
+    // -O1/-O2 does exactly that in the WebAssembly build).  The shift is
+    // therefore only performed where it is well defined; on 32 bit targets the
+    // high half is zero, so dropping it changes nothing.
+    uint32_t hash = (uint32_t)address;
+    if (sizeof(uintptr_t) > 4) {
+        hash ^= (uint32_t)(address >> 32);
+    }
     hash = hash * 2654435761u;  // Knuth's multiplicative hash
-    int color_index = hash % 32;
+    int color_index = (int)(hash % 32);
     
     // HSV色空間で色相を変える（彩度と明度は固定）
     float hue = (color_index * 360.0f / 32.0f);  // 0-360度
@@ -1010,7 +1021,11 @@ void Visualizer::getColorFromAddress(uintptr_t address, int& r, int& g, int& b) 
     float x = c * (1.0f - fabs(fmod(hue / 60.0f, 2.0f) - 1.0f));
     float m = value - c;
     
-    float r1, g1, b1;
+    // Every branch below has to leave r1/g1/b1 defined: reading them
+    // uninitialised is undefined behaviour, and an optimising compiler is
+    // entitled to turn the `(r1 + m)` arithmetic into a trap (this makes the
+    // WebAssembly build fail at -O1 and above).
+    float r1 = 0.0f, g1 = 0.0f, b1 = 0.0f;
     if (hue < 60) {
         r1 = c; g1 = x; b1 = 0;
     } else if (hue < 120) {
