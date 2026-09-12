@@ -1,0 +1,8 @@
+# Native build tree
+/build/
+
+# Browser build: toolchain (~1GB) and generated artifacts
+/tools/
+/web/dist/
+/web/build/
+/web/verify-out/

@@ -313,6 +313,7 @@ void Visualizer::renderADPCMChannels(int& y) {
         int waveform_height = adpcm_line_height - 8;
         
         // 波形データを描画
+#ifndef MDXWEB_NO_ADPCM_WAVE
         if (ac.key_on) {
             // アドレスから色を取得（一貫性のため）
             int color_r, color_g, color_b;
@@ -326,6 +327,7 @@ void Visualizer::renderADPCMChannels(int& y) {
             renderChannelWaveform(waveform_x, waveform_y, waveform_width, waveform_height,
                                 nullptr, 0, 60, 60, 80, 8 + adpcm_ch, adpcm_waveform_scale_);
         }
+#endif
         
         y += adpcm_line_height;
     }

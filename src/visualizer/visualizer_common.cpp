@@ -7,6 +7,11 @@
 #include <cmath>
 
 // 汎用波形描画関数
+//
+// MDXWEB_SAFE_RENDER: the browser build renders this waveform with a simple,
+// bounds-checked routine.  The correlation based version below walks the sample
+// buffer with offsets derived from the previous frame, which can reach past a
+// short (256 sample) ADPCM buffer and traps in WebAssembly.
 void Visualizer::renderChannelWaveform(int x, int y, int width, int height, 
                                         const int16_t* waveform_data, int sample_count,
                                         int color_r, int color_g, int color_b, int ch_id,
@@ -17,12 +22,45 @@ void Visualizer::renderChannelWaveform(int x, int y, int width, int height,
     SDL_RenderFillRect(renderer_, &wave_bg);
     SDL_SetRenderDrawColor(renderer_, 60, 60, 80, 255);
     SDL_RenderDrawRect(renderer_, &wave_bg);
-    
+
     // 中央線（ゼロライン）
     int center_y = y + height / 2;
     SDL_SetRenderDrawColor(renderer_, 80, 80, 100, 128);
     SDL_RenderDrawLine(renderer_, x, center_y, x + width, center_y);
-    
+
+    if (!waveform_data || sample_count <= 0 || width <= 0) {
+        return;
+    }
+
+#ifdef MDXWEB_SAFE_RENDER
+    int samples_to_draw = sample_count < width ? sample_count : width;
+    float adaptive_scale = waveform_scale;
+    if (ch_id >= 0 && ch_id < MAX_CHANNELS) {
+        const float TARGET_OCCUPANCY = 0.92f;
+        const float MIN_AUTO_SCALE = 0.2f;
+        const float MAX_AUTO_SCALE = 8.0f;
+        const float SILENCE_THRESHOLD = 0.0025f;
+
+        int peak = 0;
+        for (int i = 0; i < samples_to_draw; i++) {
+            int v = waveform_data[i] < 0 ? -waveform_data[i] : waveform_data[i];
+            if (v > peak) peak = v;
+        }
+        float desired = peak > (int)(SILENCE_THRESHOLD * 32768.0f)
+                            ? TARGET_OCCUPANCY * 32768.0f / peak
+                            : waveform_dynamic_scale_[ch_id] * 1.01f + 0.01f;
+        if (desired < MIN_AUTO_SCALE) desired = MIN_AUTO_SCALE;
+        if (desired > MAX_AUTO_SCALE) desired = MAX_AUTO_SCALE;
+        waveform_dynamic_scale_[ch_id] = desired;
+        adaptive_scale = waveform_scale * desired;
+    }
+    SDL_SetRenderDrawColor(renderer_, color_r, color_g, color_b, 255);
+    for (int i = 0; i < samples_to_draw - 1; i++) {
+        int y1 = center_y - (int)(waveform_data[i] * height * adaptive_scale / 2 / 32768);
+        int y2 = center_y - (int)(waveform_data[i + 1] * height * adaptive_scale / 2 / 32768);
+        SDL_RenderDrawLine(renderer_, x + i, y1, x + i + 1, y2);
+    }
+#else
     // 波形を描画
     if (waveform_data && sample_count > 0) {
         int start_offset = findStableWaveformOffset(waveform_data, sample_count, width, ch_id);
@@ -78,11 +116,12 @@ void Visualizer::renderChannelWaveform(int x, int y, int width, int height,
             has_prev_waveform_[ch_id] = true;
         }
     }
+#endif
 }
 
 // 位相安定化: 前フレームとの相関を最大化するオフセットを探す
 int Visualizer::findStableWaveformOffset(const int16_t* waveform_data, int sample_count, int width, int ch) {
-    if (!waveform_data || sample_count <= width || ch >= MAX_CHANNELS) {
+    if (!waveform_data || sample_count <= width || ch < 0 || ch >= MAX_CHANNELS) {
         return 0;
     }
     
@@ -110,10 +149,14 @@ int Visualizer::findStableWaveformOffset(const int16_t* waveform_data, int sampl
     int search_range = 300;
     int offset_start = std::max(search_start, prev_waveform_offset_[ch] - search_range);
     int offset_end = std::min(search_end, prev_waveform_offset_[ch] + search_range);
-    
+    // The correlation window cannot extend past the end of the waveform data.
+    if (offset_end > sample_count - 256) offset_end = sample_count - 256;
+
     for (int offset = offset_start; offset < offset_end; offset++) {
         // 相関を計算（フルwidth=256サンプルで比較、低周波対応）
         int compare_len = std::min(256, width);
+        if (offset + compare_len > sample_count) compare_len = sample_count - offset;
+        if (compare_len <= 0) continue;
         int64_t correlation = 0;
         
         for (int i = 0; i < compare_len; i++) {
@@ -127,6 +170,10 @@ int Visualizer::findStableWaveformOffset(const int16_t* waveform_data, int sampl
         }
     }
     
+    if (best_offset < 0) best_offset = 0;
+    if (best_offset > sample_count - width) best_offset = sample_count - width;
+    if (best_offset < 0) best_offset = 0;
+
     // 相関が非常に低い場合（大きく変化した）、ゼロクロスで再初期化
     if (best_correlation < 1000000) {
         for (int i = search_start; i < search_end - 1; i++) {

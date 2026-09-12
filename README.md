@@ -46,3 +46,18 @@ cd Release
 cmake -DCMAKE_BUILD_TYPE=Release ..
 make
 ```
+
+## Browser (WebAssembly) port
+
+The same engine also runs in a web browser, with sound and the SDL2 visualizer,
+via Emscripten:
+
+```shell
+./web/build.sh            # build web/dist/
+node web/serve.js         # play at http://127.0.0.1:8099/
+node web/verify.js        # headless end-to-end check
+```
+
+See [web/README.md](web/README.md) for the build requirements and details. The
+browser output is sample-for-sample identical to the native `mdx2wav` for the
+first seconds of playback.
