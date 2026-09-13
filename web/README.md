@@ -64,6 +64,15 @@ new layout is built.
 the FFT work in `Visualizer::updateWaveform()`. The waveform and keyboard
 displays are unaffected, and the native tool keeps the spectrum on.
 
+### Buffer / latency
+
+The ring buffer level is adjustable from the *バッファ* slider under the canvas
+(30–1500 ms, default 250 ms). It is the trade-off between safety and
+audio-visual sync: a larger buffer survives browser stalls without dropping
+audio, but the screen runs that far ahead of the sound. Changing it re-primes the
+ring from the current playback position, so the effect is immediate. The status
+line reports the buffer actually filled, and any underruns are counted there.
+
 ## Building
 
 The toolchain lives in `tools/` and is **not** part of the repository (it is

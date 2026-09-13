@@ -54,7 +54,6 @@
     image-rendering: pixelated;
   }
   #status {
-    margin-top: 10px;
     font-size: 12px;
     color: #8f93b8;
     min-height: 1.4em;
@@ -65,6 +64,11 @@
   .hint { margin-top: 10px; font-size: 12px; color: #6f7396; line-height: 1.7; }
   label.check { display: flex; align-items: center; gap: 5px; font-size: 13px; color: #aab0d0; cursor: pointer; user-select: none; }
   label.check input { accent-color: #2c79b8; cursor: pointer; }
+  .statusbar { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-top: 10px; }
+  .statusbar #status { margin-top: 0; }
+  label.buffer { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #8f93b8; white-space: nowrap; }
+  label.buffer input[type=range] { width: 180px; accent-color: #2c79b8; cursor: pointer; }
+  label.buffer output { font-variant-numeric: tabular-nums; min-width: 54px; color: #cdd6f4; }
   kbd {
     background: #1b1b38; border: 1px solid #34345f; border-bottom-width: 2px;
     border-radius: 4px; padding: 0 5px; font-size: 11px; font-family: ui-monospace, monospace;
@@ -100,7 +104,14 @@
       <button id="overlay-btn">クリックして起動</button>
     </div>
   </div>
-  <div id="status">読み込み中…</div>
+  <div class="statusbar">
+    <div id="status">読み込み中…</div>
+    <label class="buffer" title="大きくすると音が途切れにくくなりますが、画面と音のずれ（遅延）が増えます">
+      バッファ
+      <input type="range" id="buffer" min="30" max="1500" step="10">
+      <output id="buffer-value">250ms</output>
+    </label>
+  </div>
   <div class="hint">
     ビジュアライザ内のキー操作: <kbd>↑</kbd><kbd>↓</kbd> 曲送り / <kbd>C</kbd> 最初から / <kbd>X</kbd> レジスタ書き込み一時停止 /
     <kbd>B</kbd> Timer B / <kbd>M</kbd> YM2151ミュート / <kbd>Esc</kbd> 終了<br>

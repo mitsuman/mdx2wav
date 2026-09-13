@@ -12,9 +12,21 @@
   const RING_SECONDS = 2;
   const RING_FRAMES = SAMPLE_RATE * RING_SECONDS;
   const RING_BYTES = RING_FRAMES * 4;          // interleaved int16 stereo
-  const TARGET_FRAMES = Math.round(SAMPLE_RATE * 0.50);   // steady state
-  const PREBUFFER_FRAMES = Math.round(SAMPLE_RATE * 0.75);
+  // Ring fill to keep ahead of playback.  Adjustable from the page so the
+  // latency/stability trade-off can be felt directly; 250 ms is the default.
+  const DEFAULT_BUFFER_MS = 250;
+  const MIN_BUFFER_MS = 30;
+  const MAX_BUFFER_MS = 1500;
   const BYTES_PER_STEP = CHUNK_FRAMES * 4;
+
+  function targetFrames() {
+    return Math.round(SAMPLE_RATE * state.bufferMs / 1000);
+  }
+  function prebufferFrames() {
+    // Fill a little beyond the target before starting, so playback does not
+    // begin on an almost-empty ring.
+    return Math.round(targetFrames() * 1.4);
+  }
 
   const $ = (id) => document.getElementById(id);
   const canvas = $('screen');
@@ -26,6 +38,8 @@
   const fileInput = $('file');
   const songSelect = $('song');
   const spectrumToggle = $('spectrum');
+  const bufferRange = $('buffer');
+  const bufferValue = $('buffer-value');
   const statusEl = $('status');
 
   const state = {
@@ -42,6 +56,7 @@
     loadedRaw: null,    // {mdx: ArrayBuffer, pdx: ArrayBuffer|null, name: string, title: string}
     started: false,
     underruns: 0,
+    bufferMs: DEFAULT_BUFFER_MS,
   };
 
   const setStatus = (text, cls) => {
@@ -175,7 +190,8 @@
     let w = Atomics.load(state.ring, 0) % cap;
     let filled = ringFrames();
     const ptr = api.audioBuffer();
-    while (filled + CHUNK_FRAMES <= PREBUFFER_FRAMES) {
+    const want = prebufferFrames();
+    while (filled + CHUNK_FRAMES <= want) {
       const got = api.step();
       if (got <= 0) return false;
       for (let i = 0; i < got * 2; i++) {
@@ -207,8 +223,9 @@
       // consumption; a generous per-tick budget lets the loop recover quickly
       // after the browser stalls it (a long render, a hidden tab, a GC pause).
       let steps = 0;
-      const maxSteps = 200;
-      while (state.running && ringFrames() < TARGET_FRAMES && steps < maxSteps) {
+      const maxSteps = 60;
+      const target = targetFrames();
+      while (state.running && ringFrames() < target && steps < maxSteps) {
         const got = api.step();
         if (got <= 0) {
           onSongEnd();
@@ -241,7 +258,7 @@
 
     const schedule = () => {
       if (state.stopped || !state.running) { state.pumping = false; return; }
-      const low = ringFrames() < TARGET_FRAMES / 2;
+      const low = ringFrames() < targetFrames() / 2;
       pumpTimer = setTimeout(() => {
         if (state.stopped || !state.running) { state.pumping = false; return; }
         tick();
@@ -256,8 +273,10 @@
     const el = lastElapsed;
     const dur = api.duration();
     const mm = (t) => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
-    setStatus(`再生中 ${mm(el)} / ${dur > 0 ? mm(dur) : '--:--'} ・ バッファ ${(ringFrames() / SAMPLE_RATE * 1000).toFixed(0)}ms` +
-      (state.underruns ? ` <span class="warn">underrun ${state.underruns}</span>` : ''));
+    // The buffer setting itself is shown next to its slider below the canvas.
+    const filledMs = ringFrames() / SAMPLE_RATE * 1000;
+    setStatus(`再生中 ${mm(el)} / ${dur > 0 ? mm(dur) : '--:--'} ・ 実バッファ ${filledMs.toFixed(0)}ms` +
+      (state.underruns ? ` ・ <span class="warn">underrun ${state.underruns}</span>` : ''));
   }
 
   // -------------------------------------------------------------- playback
@@ -490,6 +509,36 @@
   // the window (and the waveform display) be narrower.
   spectrumToggle.checked = false;
   spectrumToggle.addEventListener('change', restartForLayout);
+
+  // Buffer / latency control.  Changing it re-primes the ring from the current
+  // playback position, so the effect on latency and on underruns is immediate.
+  bufferRange.min = String(MIN_BUFFER_MS);
+  bufferRange.max = String(MAX_BUFFER_MS);
+  bufferRange.value = String(state.bufferMs);
+  bufferValue.textContent = `${state.bufferMs}ms`;
+  bufferRange.addEventListener('input', () => {
+    setBufferMs(Number(bufferRange.value), false);
+  });
+  bufferRange.addEventListener('change', () => {
+    setBufferMs(Number(bufferRange.value), true);
+  });
+
+  function setBufferMs(ms, reprime) {
+    state.bufferMs = Math.max(MIN_BUFFER_MS, Math.min(MAX_BUFFER_MS, Math.round(ms)));
+    bufferValue.textContent = `${state.bufferMs}ms`;
+    if (reprime) reprimeRing();
+  }
+
+  // Drop whatever is buffered, then fill up to the new target so the change is
+  // audible immediately instead of after the old contents drain.
+  function reprimeRing() {
+    if (!state.running || !state.node) return;
+    state.node.port.postMessage({ type: 'reset' });
+    state.underruns = 0;
+    prefill();
+    lastElapsed = api.elapsed();
+    updateTime();
+  }
 
   fileBtn.addEventListener('click', () => fileInput.click());
 
