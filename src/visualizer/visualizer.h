@@ -21,7 +21,18 @@ static const int WHITE_KEY_WIDTH = 10;
 static const int OCTAVE_COUNT = 58;  // 表示する白鍵の数 (C0-C8 = 57-58 keys)
 static const int WAVEFORM_OFFSET = 5;  // 鍵盤と波形の間隔
 static const int CHANNEL_WAVEFORM_X = KEYBOARD_START_X + OCTAVE_COUNT * WHITE_KEY_WIDTH + WAVEFORM_OFFSET;  // 825
-static const int CHANNEL_WAVEFORM_WIDTH = 256;
+static const int CHANNEL_WAVEFORM_WIDTH = 256;  // スペクトラム表示時の幅
+static const int CHANNEL_WAVEFORM_MAX_WIDTH = 800;  // 拡大時の上限（波形バッファ長）
+
+// Spectrum analyzer strip (right edge of the classic layout).
+static const int SPECTRUM_X = 1100;
+static const int SPECTRUM_WIDTH = 300;
+
+// With the spectrum hidden the waveform takes over the strip it occupied, so the
+// window can be narrower by the same amount.
+static const int SPECTRUM_LAYOUT_MARGIN = 20;  // gap between waveform and spectrum
+static const int WINDOW_WIDTH_WITH_SPECTRUM = 1400;
+static const int WINDOW_WIDTH_WITHOUT_SPECTRUM = SPECTRUM_X - SPECTRUM_LAYOUT_MARGIN;  // 1080
 
 // Channel label colors (shared by YM2151 and ADPCM)
 static const int CHANNEL_LABEL_COLOR_ACTIVE_R = 255;
@@ -114,6 +125,33 @@ public:
     void setWaveformScale(float ym2151_scale, float adpcm_scale) {
         ym2151_waveform_scale_ = (ym2151_scale > 0.0f && ym2151_scale <= 10.0f) ? ym2151_scale : 1.0f;
         adpcm_waveform_scale_ = (adpcm_scale > 0.0f && adpcm_scale <= 10.0f) ? adpcm_scale : 1.0f;
+    }
+    
+    // スペクトラムアナライザの有効/無効
+    //
+    // Disabling it also skips the per-channel FFT in updateWaveform(), which is
+    // the single most expensive part of drawing a frame (sixteen 512-point FFTs
+    // per update).  The waveform and keyboard displays are unaffected.
+    void setSpectrumEnabled(bool enabled) { spectrum_enabled_ = enabled; }
+    bool isSpectrumEnabled() const { return spectrum_enabled_; }
+    
+    // ウィンドウ幅（スペクトラムの表示有無で変わる）
+    static int windowWidthForSpectrum(bool enabled) {
+        return enabled ? WINDOW_WIDTH_WITH_SPECTRUM : WINDOW_WIDTH_WITHOUT_SPECTRUM;
+    }
+    int windowWidth() const { return windowWidthForSpectrum(spectrum_enabled_); }
+    
+    // 波形表示の位置と幅。スペクトラムを隠したぶん波形を右へ広げる。
+    int channelWaveformX() const { return CHANNEL_WAVEFORM_X; }
+    int channelWaveformWidth() const {
+        if (spectrum_enabled_) {
+            return CHANNEL_WAVEFORM_WIDTH;
+        }
+        const int width = window_width_ - CHANNEL_WAVEFORM_X - WAVEFORM_OFFSET;
+        if (width > CHANNEL_WAVEFORM_MAX_WIDTH) {
+            return CHANNEL_WAVEFORM_MAX_WIDTH;
+        }
+        return width > 0 ? width : CHANNEL_WAVEFORM_WIDTH;
     }
     
     // スペクトラムデバッグモードの設定
@@ -218,6 +256,8 @@ private:
     int adpcm_display_channels_;
     float ym2151_waveform_scale_;  // YM2151波形表示の振幅スケール (1.0 = デフォルト)
     float adpcm_waveform_scale_;   // ADPCM波形表示の振幅スケール (1.0 = デフォルト)
+    bool spectrum_enabled_;        // スペクトラムアナライザを描画/解析するか
+    int window_width_;             // 描画中のウィンドウ幅
     
     // 描画メソッド
     void renderTitle();

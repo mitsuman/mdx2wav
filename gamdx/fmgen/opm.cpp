@@ -619,7 +619,17 @@ void OPM::Mix(Sample* buffer, int nsamples)
 		idest[5] = &ibuf[pan[5]];
 		idest[6] = &ibuf[pan[6]];
 		idest[7] = &ibuf[pan[7]];
-		
+
+		// idest[] maps several channels onto the same slot and MixSub()
+		// accumulates into its slot with `+=` for every channel but the first, so
+		// all eight accumulators must start defined.  The loop below only clears
+		// ibuf[1..3] per sample, which leaves the slots that pan[] maps other
+		// channels onto uninitialised for the very first sample, making a couple
+		// of output frames depend on whatever was on the stack.
+		for (int i = 0; i < 8; i++) {
+			ibuf[i] = 0;
+		}
+
 		Sample* limit = buffer + nsamples * 2;
 		for (Sample* dest = buffer; dest < limit; dest+=2)
 		{

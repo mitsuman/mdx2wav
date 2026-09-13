@@ -75,13 +75,26 @@ bool read_file(const char *name, int *fsize, u8 **fdata, int offset) {
     return false;
   }
 
-  u8 *data = new u8[size + offset];
+  // MXDRVG walks the song data with 32 bit loads and can read a little past the
+  // end of the file.  Its own bounds check only detects running off the *low*
+  // end (mxdrvg_core.h: L001396), so that over-read is not caught, and the bytes
+  // it lands on were whatever the allocator happened to leave behind.  Allocate a
+  // zero-filled tail so the read is defined: otherwise a handful of samples of
+  // the output differ from run to run.  The browser build already gets this from
+  // its calloc'd buffers, which is why it is deterministic.
+  const int kTailPad = 64 * 1024;
+  u8 *data = (u8 *)calloc(1, (size_t)size + offset + kTailPad);
+  if (!data) {
+    fprintf(stderr, "Out of memory reading %s\n", name);
+    close(fd);
+    return false;
+  }
   size = read(fd, data + offset, size);
 
   close(fd);
 
   *fdata = data;
-  *fsize = size + offset;
+  *fsize = size + offset + kTailPad;
   return true;
 }
 
@@ -259,8 +272,8 @@ bool LoadMDX(const char *mdx_name, char *title, int title_len, unsigned int *out
     *out_pdx_size = pdx_size;
   }
 
-  delete []mdx_buf;
-  delete []pdx_buf;
+  free(mdx_buf);
+  free(pdx_buf);
 
   return true;
 }

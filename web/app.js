@@ -12,8 +12,8 @@
   const RING_SECONDS = 2;
   const RING_FRAMES = SAMPLE_RATE * RING_SECONDS;
   const RING_BYTES = RING_FRAMES * 4;          // interleaved int16 stereo
-  const TARGET_FRAMES = Math.round(SAMPLE_RATE * 0.25);   // steady state
-  const PREBUFFER_FRAMES = Math.round(SAMPLE_RATE * 0.35);
+  const TARGET_FRAMES = Math.round(SAMPLE_RATE * 0.50);   // steady state
+  const PREBUFFER_FRAMES = Math.round(SAMPLE_RATE * 0.75);
   const BYTES_PER_STEP = CHUNK_FRAMES * 4;
 
   const $ = (id) => document.getElementById(id);
@@ -25,6 +25,7 @@
   const fileBtn = $('file-btn');
   const fileInput = $('file');
   const songSelect = $('song');
+  const spectrumToggle = $('spectrum');
   const statusEl = $('status');
 
   const state = {
@@ -98,6 +99,8 @@
     api.title = mod.cwrap('mdxweb_title', 'string', []);
     api.dumpPcm = mod.cwrap('mdxweb_dump_pcm', 'number', ['number', 'number']);
     api.shutdown = mod.cwrap('mdxweb_shutdown', null, []);
+    api.setSpectrum = mod.cwrap('mdxweb_set_spectrum', null, ['number']);
+    api.windowWidth = mod.cwrap('mdxweb_window_width', 'number', []);
   }
 
   function copyToHeap(bytes) {
@@ -196,14 +199,15 @@
     const tick = () => {
       if (state.stopped || !state.running || !state.ring) {
         state.pumping = false;
-        if (pumpTimer) { clearInterval(pumpTimer); pumpTimer = 0; }
+        if (pumpTimer) { clearTimeout(pumpTimer); pumpTimer = 0; }
         return;
       }
-      // Top up the ring, but never more than a handful of steps per frame: an
-      // unbounded catch-up would stall the loop when the tab was in the
-      // background.
+      // Top up the ring.  Audio generation is much faster than real time, so the
+      // only reason to be here repeatedly is to cover the audio thread's
+      // consumption; a generous per-tick budget lets the loop recover quickly
+      // after the browser stalls it (a long render, a hidden tab, a GC pause).
       let steps = 0;
-      const maxSteps = 60;
+      const maxSteps = 200;
       while (state.running && ringFrames() < TARGET_FRAMES && steps < maxSteps) {
         const got = api.step();
         if (got <= 0) {
@@ -225,20 +229,26 @@
     };
     tick();
     // Drive the loop from requestAnimationFrame (smooth while the page is
-    // visible) and from a timer as well, so playback survives a hidden tab.
+    // visible) and from a self-rescheduling timer, so playback also survives a
+    // hidden or busy tab.  The timer interval tightens when the ring runs low,
+    // which is what lets the loop catch up after a stall.
     const raf = () => {
       if (state.stopped || !state.running) { state.pumping = false; return; }
       tick();
       requestAnimationFrame(raf);
     };
     requestAnimationFrame(raf);
-    pumpTimer = setInterval(() => {
-      if (state.stopped || !state.running) {
-        if (pumpTimer) { clearInterval(pumpTimer); pumpTimer = 0; }
-        return;
-      }
-      tick();
-    }, 20);
+
+    const schedule = () => {
+      if (state.stopped || !state.running) { state.pumping = false; return; }
+      const low = ringFrames() < TARGET_FRAMES / 2;
+      pumpTimer = setTimeout(() => {
+        if (state.stopped || !state.running) { state.pumping = false; return; }
+        tick();
+        schedule();
+      }, low ? 2 : 20);
+    };
+    schedule();
   }
 
   function updateTime() {
@@ -300,11 +310,39 @@
     pump();
   }
 
+  // The layout is fixed at init time, so a change of the spectrum setting needs
+  // the engine restarted.  Playback resumes from the beginning of the song.
+  async function restartForLayout() {
+    if (!state.ready) return;
+    const wasRunning = state.running;
+    const raw = state.loadedRaw || state.pendingRaw;
+    stop();
+    await ready;
+    try {
+      // Tear the engine down so mdxweb_init() can build the new layout.
+      api.shutdown();
+      api.setSpectrum(spectrumToggle.checked ? 1 : 0);
+      canvas.width = api.windowWidth();
+      if (!api.init(8, 8, 1.0, canvas.width, canvas.height)) {
+        setStatus('レイアウト変更に失敗しました', 'err');
+        return;
+      }
+    } catch (e) {
+      setStatus(`レイアウト変更に失敗: ${e && e.message ? e.message : e}`, 'err');
+      return;
+    }
+    if (wasRunning && raw) {
+      await play(raw);
+    } else {
+      setStatus(`レイアウトを変更しました（スペアナ${spectrumToggle.checked ? '表示' : '非表示'}）`);
+    }
+  }
+
   function stop() {
     state.running = false;
     state.pumping = false;
     state.stopped = true;
-    if (pumpTimer) { clearInterval(pumpTimer); pumpTimer = 0; }
+    if (pumpTimer) { clearTimeout(pumpTimer); pumpTimer = 0; }
     if (state.ready || state.module) { /* engine stop is optional */ }
     try { api.running && api.running(); } catch (e) { /* ignore */ }
     playBtn.disabled = false;
@@ -315,7 +353,7 @@
   function onSongEnd() {
     state.running = false;
     state.pumping = false;
-    if (pumpTimer) { clearInterval(pumpTimer); pumpTimer = 0; }
+    if (pumpTimer) { clearTimeout(pumpTimer); pumpTimer = 0; }
     playBtn.disabled = false;
     stopBtn.disabled = true;
     setStatus('曲の終わりまで再生しました');
@@ -368,6 +406,10 @@
       return;
     }
 
+    // The spectrum setting determines the layout width, so apply it first and
+    // size the canvas to match (hiding the spectrum narrows the window).
+    api.setSpectrum(spectrumToggle.checked ? 1 : 0);
+    canvas.width = api.windowWidth();
     const ok = api.init(8, 8, 1.0, canvas.width, canvas.height);
     if (!ok) {
       setStatus('エンジンの初期化に失敗しました', 'err');
@@ -442,6 +484,12 @@
     state.pumping = false;
     await play(await loadSongEntry(entry));
   });
+
+  // The spectrum analyzers are off by default: they cost sixteen 512-point FFTs
+  // per frame, which is the heaviest part of the visualizer, and hiding them lets
+  // the window (and the waveform display) be narrower.
+  spectrumToggle.checked = false;
+  spectrumToggle.addEventListener('change', restartForLayout);
 
   fileBtn.addEventListener('click', () => fileInput.click());
 

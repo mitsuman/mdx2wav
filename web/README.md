@@ -50,6 +50,20 @@ rendered every seventh step (~14 Hz) so that drawing never throttles audio
 generation. All engine code runs on the Emscripten main thread, which is what
 SDL2 needs to own the canvas.
 
+### Spectrum analyzer
+
+The spectrum strip is **off by default in the browser**: filling it costs
+sixteen 512-point FFTs per update, which is the most expensive part of a frame.
+With it off the engine runs roughly 50× faster than real time instead of ~20×,
+and the window narrows by the width of the strip (1400 → 1080 px) with the
+per-channel waveform display widened to use the freed space. The *スペアナ*
+checkbox in the header turns it back on; changing it restarts the engine so the
+new layout is built.
+
+`Visualizer::setSpectrumEnabled()` implements this: it skips both the drawing and
+the FFT work in `Visualizer::updateWaveform()`. The waveform and keyboard
+displays are unaffected, and the native tool keeps the spectrum on.
+
 ## Building
 
 The toolchain lives in `tools/` and is **not** part of the repository (it is
@@ -100,6 +114,18 @@ browser-only workarounds, and the native build is unaffected.
     original colours.
   * `r1`/`g1`/`b1` are also initialised before the hue branch, so the
     `(r1 + m)` arithmetic can never read an indeterminate value.
+* `gamdx/fmgen/opm.cpp` — `OPM::Mix()`
+  * the eight per-sample accumulators (`ibuf[]`) were only ever cleared for
+    indices 1..3, but `pan[]` maps several channels onto the same slot and
+    `MixSub()` accumulates with `+=`, so the first sample mixed an
+    uninitialised value. It made a couple of output frames depend on whatever
+    was on the stack.
+* `src/mdx2wav.cpp` — `read_file()`
+  * MXDRVG walks song data with 32-bit loads and can read slightly past the end
+    of the file; its bounds check only covers the low side, so the over-read
+    landed on uninitialised heap and a handful of samples differed from run to
+    run. The buffers now carry a zeroed 64 KB tail, matching what the browser
+    build already got from `calloc`.
 * `gamdx/mxdrvg/mxdrvg_core.h` — `L0005f8()` (the driver's block copy)
   * the loop casts the source and destination to `uint32_t *` and dereferences
     them. The 68000 tolerates unaligned longword access and x86 tolerates it
@@ -189,7 +215,9 @@ gets it from malloc rounding).
   shows a "click to start" overlay for this.
 * The video-recording (`--video`), screenshot and spectrum-debug options of the
   native tool are not exposed in the browser; FFmpeg is stubbed out.
-* The native binary is not bit-reproducible across runs: a handful of samples
-  (~5 of 88200 in the first second) depend on uninitialised heap contents. The
-  browser build starts from zeroed buffers, so its output is deterministic — and
-  is what the comparison in `web/verify.js` is anchored to.
+* A handful of samples (4 of 88217 in the first two frames of MHAWK3.MDX) can
+  still differ between two runs of the *native* binary. The heap-content
+  dependencies found above are fixed; what remains tracks the process address
+  layout, which ASLR varies. It is inaudible, and the browser build — which is
+  what `web/verify.js` compares against — is deterministic and matches the
+  native output sample for sample.

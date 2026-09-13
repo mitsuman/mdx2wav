@@ -49,6 +49,9 @@ const int DEFAULT_LOOP = 2;
 const int CHUNK_SAMPLES = SAMPLE_RATE / 100;  // 10ms, matches the native binary
 
 bool g_verbose = false;
+// The spectrum analyzers run sixteen FFTs per update, by far the most expensive
+// part of a frame, so the browser build leaves them off unless asked.
+bool g_spectrum_enabled = false;
 
 std::vector<int16_t> g_audio;   // CHUNK_SAMPLES * 2 interleaved samples
 float g_volume = 1.0f;
@@ -82,6 +85,7 @@ struct MDXEngine {
   OPM_Delegate* opm_original = nullptr;
   OPMVisualizer* opm_wrapper = nullptr;
   PCM8Visualizer* pcm8_wrapper = nullptr;
+  X68K::X68PCM8* pcm8_original = nullptr;
   bool paused = false;
 };
 
@@ -104,6 +108,25 @@ void mdxweb_configure(int volume_percent, int swap_channels, int loop, int fadeo
 EMSCRIPTEN_KEEPALIVE
 void mdxweb_verbose(int enabled) { g_verbose = enabled != 0; }
 
+// Enable or disable the spectrum analyzers (1 = on).  Disabling also stops the
+// per-channel FFT work in Visualizer::updateWaveform(), and widens the waveform
+// display into the strip the spectrum used to occupy.
+EMSCRIPTEN_KEEPALIVE
+void mdxweb_set_spectrum(int enabled) {
+  g_spectrum_enabled = enabled != 0;
+  if (E && E->visualizer) {
+    E->visualizer->setSpectrumEnabled(g_spectrum_enabled);
+  }
+}
+
+// Canvas size the current spectrum setting expects (the width shrinks when the
+// spectrum is hidden).  Call before mdxweb_init().
+EMSCRIPTEN_KEEPALIVE
+int mdxweb_window_width() {
+  return Visualizer::windowWidthForSpectrum(g_spectrum_enabled);
+}
+
+
 EMSCRIPTEN_KEEPALIVE
 int mdxweb_init(int ym2151_channels, int adpcm_channels, float waveform_scale,
                 int width, int height) {
@@ -125,6 +148,19 @@ int mdxweb_init(int ym2151_channels, int adpcm_channels, float waveform_scale,
     return 1;
   }
 
+  // init() is called again after mdxweb_shutdown() to rebuild the visualizer
+  // when the layout changes, so start from a clean slate.
+  E->running = false;
+  E->paused = false;
+  E->elapsed = 0.0;
+  E->frames = 0;
+  E->ym_state = nullptr;
+  E->visualizer = nullptr;
+  E->opm_original = nullptr;
+  E->opm_wrapper = nullptr;
+  E->pcm8_wrapper = nullptr;
+  E->pcm8_original = nullptr;
+
   MXDRVG_SetEmulationType(MXDRVG_YM2151TYPE_FMGEN);
 
   if (MXDRVG_Start(SAMPLE_RATE, FILTER_MODE, MDX_BUF_SIZE, PDX_BUF_SIZE) != 0) {
@@ -138,6 +174,13 @@ int mdxweb_init(int ym2151_channels, int adpcm_channels, float waveform_scale,
   E->ym_state = new YM2151State();
 
   E->visualizer = new Visualizer();
+  // The spectrum setting decides the layout width, so it has to be in place
+  // before the window is created.
+  E->visualizer->setSpectrumEnabled(g_spectrum_enabled);
+
+  // The spectrum setting decides the layout width.
+  width = Visualizer::windowWidthForSpectrum(g_spectrum_enabled);
+
   if (!E->visualizer->init("MDX Visualizer", width, height)) {
     Log("Visualizer init failed");
     return 0;
@@ -154,6 +197,7 @@ int mdxweb_init(int ym2151_channels, int adpcm_channels, float waveform_scale,
     E->visualizer->setOPMWrapper(E->opm_wrapper);
   }
 
+  E->pcm8_original = MXDRVG_GetPCM8();
   E->pcm8_wrapper = new PCM8Visualizer(E->ym_state);
   MXDRVG_SetPCM8(E->pcm8_wrapper);
 
@@ -340,6 +384,17 @@ EMSCRIPTEN_KEEPALIVE
 void mdxweb_shutdown() {
   if (!E) return;
   MXDRVG_End();
+  // Restore the driver's own delegates before the wrappers that were installed
+  // over them are destroyed, otherwise the driver would keep pointing at freed
+  // objects and a later mdxweb_init() would crash.
+  if (E->opm_original) {
+    MXDRVG_SetOPMDelegate(E->opm_original);
+    E->opm_original = nullptr;
+  }
+  if (E->pcm8_original) {
+    MXDRVG_SetPCM8(E->pcm8_original);
+    E->pcm8_original = nullptr;
+  }
   if (E->visualizer) {
     E->visualizer->shutdown();
     delete E->visualizer;

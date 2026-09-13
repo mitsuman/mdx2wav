@@ -307,9 +307,9 @@ void Visualizer::renderADPCMChannels(int& y) {
         renderBitmapText(info, len_x, len_y + 26, seg_r/2, seg_g/2, seg_b/2);
         
         // ADPCM波形表示（YM2151と同じ位置）
-        int waveform_x = CHANNEL_WAVEFORM_X;
+        int waveform_x = channelWaveformX();
         int waveform_y = len_y;
-        int waveform_width = CHANNEL_WAVEFORM_WIDTH;
+        int waveform_width = channelWaveformWidth();
         int waveform_height = adpcm_line_height - 8;
         
         // 波形データを描画
@@ -321,7 +321,8 @@ void Visualizer::renderADPCMChannels(int& y) {
             
             // 汎用波形描画関数を使用（ADPCM用のスケールを適用）
             renderChannelWaveform(waveform_x, waveform_y, waveform_width, waveform_height,
-                                ac.waveform, CHANNEL_WAVEFORM_WIDTH, color_r, color_g, color_b, 8 + adpcm_ch, adpcm_waveform_scale_);
+                                ac.waveform, (int)(sizeof(ac.waveform) / sizeof(ac.waveform[0])),
+                                color_r, color_g, color_b, 8 + adpcm_ch, adpcm_waveform_scale_);
         } else {
             // キーオフ時は空の波形枠のみ表示
             renderChannelWaveform(waveform_x, waveform_y, waveform_width, waveform_height,

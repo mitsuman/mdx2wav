@@ -79,6 +79,8 @@ Visualizer::Visualizer()
     , adpcm_display_channels_(8)
     , ym2151_waveform_scale_(1.0f)
     , adpcm_waveform_scale_(1.0f)
+    , spectrum_enabled_(true)
+    , window_width_(WINDOW_WIDTH_WITH_SPECTRUM)
     , spectrum_debug_file_(nullptr)
     , spectrum_debug_frame_count_(0) {
     song_title_[0] = '\0';
@@ -243,6 +245,7 @@ bool Visualizer::init(const char* title, int width, int height) {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
         return false;
     }
+    window_width_ = width;
     
     // ウィンドウ作成
     window_ = SDL_CreateWindow(
@@ -313,6 +316,7 @@ bool Visualizer::initVideoMode(const char* video_filename, int width, int height
     video_width_ = width;
     video_height_ = height;
     video_fps_ = fps;
+    window_width_ = width;
     
     // SDL初期化（オフスクリーンレンダリング用）
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -401,6 +405,11 @@ void Visualizer::setSpectrumDebug(const char* filename) {
 
 void Visualizer::updateWaveform(const short* samples, int count) {
     if (!impl || !samples) return;
+
+    // The spectrum analyzers are driven from here: sixteen 512-point FFTs per
+    // update, which dominates the cost of a frame.  Skip the analysis entirely
+    // when the spectrum is not being drawn.
+    const bool analyze_spectrum = spectrum_enabled_;
     
     // 動画モードの場合は音声エンコーダーに送る
     if (video_mode_ && video_encoder_) {
@@ -408,7 +417,7 @@ void Visualizer::updateWaveform(const short* samples, int count) {
     }
     
     // チャンネルごとにスペクトラムアナライザにデータを渡す
-    if (opm_ptr_) {
+    if (analyze_spectrum && opm_ptr_) {
         FM::OPM* opm = (FM::OPM*)opm_ptr_;
         
         // YM2151の各チャンネル（0-7）の波形を取得
@@ -430,7 +439,7 @@ void Visualizer::updateWaveform(const short* samples, int count) {
     }
     
     // ADPCM用（各チャンネルの波形を個別に解析）
-    if (state_) {
+    if (analyze_spectrum && state_) {
         YM2151State::ADPCMChannel adpcm_channels[8];
         state_->getAllADPCMChannels(adpcm_channels);
         const int waveform_samples = sizeof(adpcm_channels[0].waveform) / sizeof(int16_t);
@@ -655,7 +664,9 @@ void Visualizer::update() {
     renderTimerInfo();
     renderChannelInfo();
     renderKeyboard();
-    renderSpectrum();
+    if (spectrum_enabled_) {
+        renderSpectrum();
+    }
     //renderWaveform();
     
     // 画面更新
@@ -701,7 +712,9 @@ bool Visualizer::renderVideoFrame() {
     renderTimerInfo();
     renderChannelInfo();
     renderKeyboard();
-    renderSpectrum();
+    if (spectrum_enabled_) {
+        renderSpectrum();
+    }
     
     // レンダラーの内容をサーフェスに反映
     SDL_RenderPresent(renderer_);
@@ -1528,7 +1541,7 @@ void Visualizer::renderTitle() {
     TTF_Font* font_sm = (TTF_Font*)font_small_;
     
     // タイトル背景
-    SDL_Rect bg = {0, 0, 1400, 40};
+    SDL_Rect bg = {0, 0, window_width_, 40};
     SDL_SetRenderDrawColor(renderer_, 20, 20, 60, 255);
     SDL_RenderFillRect(renderer_, &bg);
     
@@ -1552,7 +1565,7 @@ void Visualizer::renderTitle() {
         if (filename_surface) {
             SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer_, filename_surface);
             if (texture) {
-                SDL_Rect dst = {1400 - filename_surface->w - 10, 22, filename_surface->w, filename_surface->h};
+                SDL_Rect dst = {window_width_ - filename_surface->w - 10, 22, filename_surface->w, filename_surface->h};
                 SDL_RenderCopy(renderer_, texture, nullptr, &dst);
                 SDL_DestroyTexture(texture);
             }
@@ -1583,7 +1596,7 @@ void Visualizer::renderTitle() {
                         SDL_FreeSurface(fn_surface);
                     }
                 }
-                SDL_Rect dst = {1400 - filename_width - time_surface->w - 30, 22, time_surface->w, time_surface->h};
+                SDL_Rect dst = {window_width_ - filename_width - time_surface->w - 30, 22, time_surface->w, time_surface->h};
                 SDL_RenderCopy(renderer_, texture, nullptr, &dst);
                 SDL_DestroyTexture(texture);
             }
@@ -1593,7 +1606,7 @@ void Visualizer::renderTitle() {
     
     // 区切り線
     SDL_SetRenderDrawColor(renderer_, 80, 90, 150, 255);
-    SDL_RenderDrawLine(renderer_, 0, 40, 1400, 40);
+    SDL_RenderDrawLine(renderer_, 0, 40, window_width_, 40);
 }
 
 void Visualizer::renderTimerInfo() {
@@ -1648,7 +1661,7 @@ void Visualizer::renderTimerInfo() {
     
     // 区切り線
     SDL_SetRenderDrawColor(renderer_, 60, 70, 100, 255);
-    SDL_RenderDrawLine(renderer_, 0, y + 10, 1400, y + 10);
+    SDL_RenderDrawLine(renderer_, 0, y + 10, window_width_, y + 10);
 }
 
 void Visualizer::renderChannelInfo() {
@@ -1923,6 +1936,7 @@ void Visualizer::renderChannelInfo() {
 
 void Visualizer::renderKeyboard() {
     if (!state_) return;
+
     
     YM2151State::Channel channels[8];
     state_->getAllChannels(channels);
@@ -1940,8 +1954,8 @@ void Visualizer::renderKeyboard() {
     int black_key_height = (white_key_height * 2) / 3;
     
     // 波形表示の設定
-    int waveform_x = CHANNEL_WAVEFORM_X;
-    int waveform_width = CHANNEL_WAVEFORM_WIDTH;
+    int waveform_x = channelWaveformX();
+    int waveform_width = channelWaveformWidth();
     int waveform_height = line_height - 20;
     
     // FMチャンネルのみ鍵盤表示 (ADPCMは音程情報がないため表示しない)
@@ -2196,9 +2210,15 @@ void Visualizer::renderKeyboard() {
         int wave_r, wave_g, wave_b;
         getChannelColor(channel.algorithm, wave_r, wave_g, wave_b);
         
-        // 汎用波形描画関数を使用（YM2151用のスケールを適用）
+        // 汎用波形描画関数を使用（YM2151用のスケールを適用）。
+        // The waveform may now be wider than the captured buffer, so only feed it
+        // as many samples as actually exist.
+        int fm_samples = YM2151State::CHANNEL_WAVEFORM_SIZE;
+        if (waveform_width < fm_samples) {
+            fm_samples = waveform_width;
+        }
         renderChannelWaveform(waveform_x, base_y + 2, waveform_width, waveform_height,
-                            waveform_data, YM2151State::CHANNEL_WAVEFORM_SIZE,
+                            waveform_data, fm_samples,
                             wave_r, wave_g, wave_b, ch, ym2151_waveform_scale_);
     }
 }
@@ -2746,12 +2766,24 @@ void Visualizer::renderSpectrumSection(int x, int y, int width, int height,
         SDL_RenderDrawLine(renderer_, x, grid_y, x + width - 1, grid_y);
     }
 
+    // Resolve every bin once instead of once per pixel column: sampleMagnitude()
+    // below is called width times (300 by default) and each call used to ask the
+    // analyzer for two bins, which dominated the frame time when all sixteen
+    // channels are displayed.
+    static const int MAX_MAGNITUDE_CACHE = SpectrumAnalyzer::NUM_BINS;
+    float magnitude_cache[MAX_MAGNITUDE_CACHE];
+    for (int i = 0; i < bin_count && i < MAX_MAGNITUDE_CACHE; ++i) {
+        magnitude_cache[i] = analyzer->getMagnitude(i);
+    }
+
     auto sampleMagnitude = [&](float normalized) {
         float bin_pos = normalized * (bin_count - 1);
         int base_bin = static_cast<int>(bin_pos);
+        if (base_bin < 0) base_bin = 0;
+        if (base_bin > bin_count - 1) base_bin = bin_count - 1;
         float frac = bin_pos - base_bin;
-        float mag0 = analyzer->getMagnitude(base_bin);
-        float mag1 = analyzer->getMagnitude(std::min(base_bin + 1, bin_count - 1));
+        float mag0 = magnitude_cache[base_bin];
+        float mag1 = magnitude_cache[std::min(base_bin + 1, bin_count - 1)];
         return mag0 + (mag1 - mag0) * frac;
     };
 
@@ -2780,8 +2812,10 @@ void Visualizer::renderSpectrumSection(int x, int y, int width, int height,
 
 // スペクトラムアナライザの描画
 void Visualizer::renderSpectrum() {
-    const int SPECTRUM_X = 1100;  // 元のウィンドウ右端から開始
-    const int SPECTRUM_WIDTH = 300;
+    if (!spectrum_enabled_) {
+        return;
+    }
+
     const int SPECTRUM_START_Y = YM2151_START_Y;
     
     // デバッグ出力（最初の10フレームのみ）
