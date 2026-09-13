@@ -1,10 +1,10 @@
 // End-to-end verification of the browser port.
 //
-//   node web/verify.js [--song MHAWK3.MDX] [--seconds 6] [--out web/dist/..]
+//   node web/verify.js [--song web/songs/SION/sion00.mdx] [--seconds 6] [--out web/dist/..]
 //
 // Checks that
 //   1. the WASM engine boots in a real browser,
-//   2. MHAWK3.MDX renders audio into the ring buffer (non silent, no underruns),
+//   2. the page's default song renders audio (non silent, no underruns),
 //   3. the canvas shows the visualizer (screenshot is written to disk),
 //   4. the DSP output matches the native mdx2wav binary bit-for-bit-ish.
 //
@@ -24,7 +24,8 @@ function arg(name, fallback) {
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : fallback;
 }
 
-const SONG = arg('--song', 'MHAWK3.MDX');
+// Native-binary reference path, relative to the repository root.
+const SONG = path.resolve(arg('--song', path.join(ROOT, 'web', 'songs', 'SION', 'sion00.mdx')));
 const SECONDS = Number(arg('--seconds', '6'));
 const OUT_DIR = path.resolve(arg('--out', path.join(ROOT, 'web', 'verify-out')));
 
@@ -77,7 +78,7 @@ async function main() {
     }
 
     // Load and start the song through the same path the UI uses.
-    log(`==> loading ${SONG} and starting playback`);
+    log(`==> loading the page default song and starting playback`);
     const info = await browser.evaluate(`(async () => {
       const m = window.__mdxweb;
       const raw = await m.defaultSong();
@@ -171,8 +172,7 @@ async function main() {
     log(`    wrote ${webPcm} (${fs.statSync(webPcm).size} bytes)`);
 
     const nativePcm = path.join(OUT_DIR, 'native.pcm');
-    const mdxPath = path.join(ROOT, '..', '..', 'mdx', 'metalhawk', SONG);
-    const native = spawn(path.join(ROOT, 'build', 'mdx2wav'), ['-d', '3', mdxPath], {
+    const native = spawn(path.join(ROOT, 'build', 'mdx2wav'), ['-d', '3', SONG], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const chunks = [];

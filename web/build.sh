@@ -52,7 +52,6 @@ C_SOURCES=(
 mkdir -p "$OUT" "$BUILD/obj"
 
 PORTS_FLAGS=(
-  -pthread
   -sUSE_SDL=2
   -sUSE_SDL_IMAGE=2
   -sSDL2_IMAGE_FORMATS='["png"]'
@@ -72,8 +71,6 @@ CXX_FLAGS=(-std=c++11)
 
 LINK_FLAGS=(
   -O2
-  -pthread
-  -sPTHREAD_POOL_SIZE=8
   -sALLOW_MEMORY_GROWTH=1
   -sINITIAL_MEMORY=536870912
   -sSTACK_SIZE=33554432
@@ -112,6 +109,11 @@ OBJS="$(find "$BUILD/obj" -name '*.o' | sort)"
 echo "==> linking"
 # shellcheck disable=SC2086
 "$TOOLS/bin/em++" $OBJS "${PORTS_FLAGS[@]}" "${LINK_FLAGS[@]}"
+
+# index.html and app.js are sources in web/, but they have to sit next to
+# mdxweb.js/.wasm/.data because Emscripten resolves the data package relative to
+# the document.  dist/ is therefore the complete site.
+cp "$ROOT/web/index.html" "$ROOT/web/app.js" "$OUT/"
 
 echo "==> done"
 ls -la "$OUT"

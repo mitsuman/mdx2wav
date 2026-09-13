@@ -1,0 +1,68 @@
+name: Deploy browser player to GitHub Pages
+
+# Builds the WebAssembly engine and publishes the static site in web/pages/.
+#
+# The sample songs are copyrighted and are NOT in this repository, so CI cannot
+# fetch them.  To publish with songs, either
+#   * run web/setup_songs.sh locally and commit web/pages/ yourself (the
+#     "Deploy from a branch" Pages setting), or
+#   * add a repository secret/variable holding a URL to a song archive and fetch
+#     it in a step before web/build_pages.sh, or
+#   * publish without songs and use the page's "ファイルを開く…" button.
+#
+# CI therefore builds the engine and assembles everything except the songs; the
+# page still works, it just has nothing to autoplay.
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.61
+
+      - name: Build the engine
+        run: |
+          # build.sh expects the toolchain under tools/; point it at the SDK that
+          # setup-emsdk installed instead.
+          export EMSDK_PYTHON="$(command -v python3)"
+          export PATH="$EMSDK:$EMSDK/upstream/emscripten:$PATH"
+          EM_CONFIG="$EMSDK/.emscripten" \
+          EM_CACHE="$EMSDK/upstream/emscripten/cache" \
+          ./web/build.sh
+
+      - name: Assemble the site (without songs)
+        run: |
+          mkdir -p web/songs/SION web/songs/SION2
+          # An empty songs/ makes the page start with the file picker instead.
+          ./web/build_pages.sh
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web/pages
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

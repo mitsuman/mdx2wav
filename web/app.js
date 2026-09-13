@@ -46,8 +46,12 @@
     module: null,
     ctx: null,
     node: null,
-    ring: null,
-    ringSamples: null,
+    transport: 'none',   // 'shared' or 'message'
+    produced: 0,         // frames handed to the audio thread (message mode)
+    consumed: 0,         // frames the audio thread reports having played
+    pending: null,       // batch being accumulated for the next transfer
+    pendingFrames: 0,
+    underruns: 0,
     ready: false,
     running: false,
     pumping: false,
@@ -55,7 +59,6 @@
     current: -1,
     loadedRaw: null,    // {mdx: ArrayBuffer, pdx: ArrayBuffer|null, name: string, title: string}
     started: false,
-    underruns: 0,
     bufferMs: DEFAULT_BUFFER_MS,
   };
 
@@ -141,13 +144,72 @@
 
   // ------------------------------------------------------------- audio ring
 
-  function ringFrames() {
-    const cap = state.ring[2];
-    const w = Atomics.load(state.ring, 0) % cap;
-    const r = Atomics.load(state.ring, 1) % cap;
-    let n = w - r;
-    if (n < 0) n += cap;
-    return n;
+  // Frames currently held by the audio thread.  In shared mode this is derived
+  // from the ring indices; in message mode it is reported by the worklet.
+  function bufferedFrames() {
+    if (state.transport === 'shared' && state.ring) {
+      const cap = state.ring[2];
+      const w = Atomics.load(state.ring, 0) % cap;
+      const r = Atomics.load(state.ring, 1) % cap;
+      let n = w - r;
+      if (n < 0) n += cap;
+      return n;
+    }
+    // Message mode: frames handed over minus frames the audio thread reports
+    // having played.  Deriving it from counters means a dropped progress message
+    // cannot leave the producer stuck believing the queue is full.
+    const held = state.produced - state.consumed;
+    return held > 0 ? held : 0;
+  }
+
+  // Run the engine until the audio thread holds `want` frames, or the song ends.
+  // Steps are accumulated and handed over in one batch: in message mode each
+  // step would otherwise be a separate postMessage, which is far too chatty to
+  // keep up with playback.
+  const BATCH_MAX_FRAMES = Math.round(SAMPLE_RATE * 0.2);  // <= 200 ms per transfer
+  function generateUpTo(want, maxSteps) {
+    let steps = 0;
+    while (state.running || steps === 0) {
+      const held = bufferedFrames() + state.pendingFrames;
+      if (held >= want || steps >= maxSteps) break;
+      const got = api.step();
+      if (got <= 0) return false;
+      pushAudio(got);
+      steps++;
+    }
+    return true;
+  }
+
+  // Hand the engine's current chunk to the audio thread.
+  function pushAudio(frames) {
+    const ptr = api.audioBuffer();
+    if (state.transport === 'shared') {
+      const cap = RING_FRAMES;
+      let w = Atomics.load(state.ring, 0) % cap;
+      for (let i = 0; i < frames * 2; i++) {
+        state.ringSamples[w * 2 + i] = window.Module.HEAP16[(ptr >> 1) + i];
+      }
+      w = (w + frames) % cap;
+      Atomics.store(state.ring, 0, w);
+      return;
+    }
+    // Message mode: accumulate into a batch and post it once it is big enough.
+    if (!state.pending) {
+      state.pending = new Int16Array(BATCH_MAX_FRAMES * 2);
+      state.pendingFrames = 0;
+    }
+    let src = ptr >> 1;
+    let remaining = frames;
+    while (remaining > 0) {
+      const room = BATCH_MAX_FRAMES - state.pendingFrames;
+      const take = Math.min(room, remaining);
+      state.pending.set(window.Module.HEAP16.subarray(src, src + take * 2),
+                        state.pendingFrames * 2);
+      state.pendingFrames += take;
+      src += take * 2;
+      remaining -= take;
+      if (state.pendingFrames >= BATCH_MAX_FRAMES) flushAudio();
+    }
   }
 
   async function initAudio() {
@@ -157,51 +219,79 @@
     }
     const ctx = new AudioContext({ sampleRate: SAMPLE_RATE, latencyHint: 'interactive' });
     await ctx.audioWorklet.addModule('worklet/player-processor.js');
-    const sab = new SharedArrayBuffer(16 + RING_BYTES);
-    const ring = new Int32Array(sab);
-    ring[0] = 0;
-    ring[1] = 0;
-    ring[2] = RING_FRAMES;
-    ring[3] = 0;
-    const node = new AudioWorkletNode(ctx, 'mdx-player', {
+
+    const options = {
       numberOfInputs: 0,
       numberOfOutputs: 1,
       outputChannelCount: [2],
-      processorOptions: { sab },
-    });
+      processorOptions: {},
+    };
+
+    // SharedArrayBuffer is faster, but it needs COOP/COEP response headers that
+    // static hosts such as GitHub Pages cannot set.  Fall back to transferring
+    // sample blocks over postMessage when it is unavailable.  ?transport=...
+    // forces one or the other, which is handy for testing and for hosts that
+    // send the headers but where the shared ring misbehaves.
+    const forced = new URLSearchParams(location.search).get('transport');
+    const wantShared = forced ? forced === 'shared'
+                              : typeof SharedArrayBuffer === 'function';
+    if (wantShared && typeof SharedArrayBuffer === 'function') {
+      const sab = new SharedArrayBuffer(16 + RING_BYTES);
+      const ring = new Int32Array(sab);
+      ring[0] = 0;
+      ring[1] = 0;
+      ring[2] = RING_FRAMES;
+      ring[3] = 0;
+      state.ring = ring;
+      state.ringSamples = new Int16Array(sab, 16);
+      state.transport = 'shared';
+      options.processorOptions.sab = sab;
+    } else {
+      state.ring = null;
+      state.ringSamples = null;
+      state.transport = 'message';
+    }
+
+    const node = new AudioWorkletNode(ctx, 'mdx-player', options);
     node.port.onmessage = (e) => {
-      if (e.data && e.data.type === 'underrun') {
-        state.underruns = e.data.count;
-        if (state.underruns === 1) {
-          setStatus('音声バッファが不足しました（タブが非アクティブの可能性があります）', 'warn');
+      const msg = e.data;
+      if (!msg) return;
+      if (typeof msg.consumed === 'number') {
+        state.consumed = msg.consumed;
+      }
+      if (msg.type === 'underrun') {
+        state.underruns = msg.count;
+        // One gap of a few milliseconds is inaudible; only warn when it keeps
+        // happening, which is when the buffer really is too small.
+        if (state.underruns > 40 && !state.warnedUnderrun) {
+          state.warnedUnderrun = true;
+          setStatus('音声バッファが不足気味です — 下のスライダーで増やせます', 'warn');
         }
       }
     };
     node.connect(ctx.destination);
     state.ctx = ctx;
     state.node = node;
-    state.ring = ring;
-    state.ringSamples = new Int16Array(sab, 16);
+    state.produced = 0;
+    state.consumed = 0;
+    state.underruns = 0;
   }
 
-  // Prefill the ring before unpausing the audio graph so playback starts clean.
+  // Fill the audio thread before unpausing the graph so playback starts clean.
   function prefill() {
-    const cap = RING_FRAMES;
-    let w = Atomics.load(state.ring, 0) % cap;
-    let filled = ringFrames();
-    const ptr = api.audioBuffer();
-    const want = prebufferFrames();
-    while (filled + CHUNK_FRAMES <= want) {
-      const got = api.step();
-      if (got <= 0) return false;
-      for (let i = 0; i < got * 2; i++) {
-        state.ringSamples[w * 2 + i] = window.Module.HEAP16[(ptr >> 1) + i];
-      }
-      w = (w + got) % cap;
-      Atomics.store(state.ring, 0, w);
-      filled += got;
-    }
-    return true;
+    return generateUpTo(prebufferFrames(), 4000);
+  }
+
+  function flushAudio() {
+    if (!state.pending || state.pendingFrames === 0 || !state.node) return;
+    const frames = state.pendingFrames;
+    // A real copy, not a view: the buffer is transferred (detached) to the audio
+    // thread, so the accumulation buffer has to stay usable afterwards.
+    const out = new Int16Array(frames * 2);
+    out.set(state.pending.subarray(0, frames * 2));
+    state.pendingFrames = 0;
+    state.produced += frames;
+    state.node.port.postMessage({ type: 'samples', frames, buffer: out.buffer }, [out.buffer]);
   }
 
   // ------------------------------------------------------------------ pump
@@ -213,35 +303,22 @@
     if (state.pumping) return;
     state.pumping = true;
     const tick = () => {
-      if (state.stopped || !state.running || !state.ring) {
+      if (state.stopped || !state.running || !state.node) {
         state.pumping = false;
         if (pumpTimer) { clearTimeout(pumpTimer); pumpTimer = 0; }
         return;
       }
-      // Top up the ring.  Audio generation is much faster than real time, so the
-      // only reason to be here repeatedly is to cover the audio thread's
-      // consumption; a generous per-tick budget lets the loop recover quickly
-      // after the browser stalls it (a long render, a hidden tab, a GC pause).
-      let steps = 0;
-      const maxSteps = 60;
-      const target = targetFrames();
-      while (state.running && ringFrames() < target && steps < maxSteps) {
-        const got = api.step();
-        if (got <= 0) {
-          onSongEnd();
-          break;
-        }
-        const cap = RING_FRAMES;
-        let w = Atomics.load(state.ring, 0) % cap;
-        const ptr = api.audioBuffer();
-        for (let i = 0; i < got * 2; i++) {
-          state.ringSamples[w * 2 + i] = window.Module.HEAP16[(ptr >> 1) + i];
-        }
-        w = (w + got) % cap;
-        Atomics.store(state.ring, 0, w);
-        steps++;
+      // Top up the audio thread's queue.  Generation is much faster than real
+      // time, so the only reason to be here repeatedly is to cover its
+      // consumption; the budget lets the loop recover after a stall.
+      const before = api.elapsed();
+      const ok = generateUpTo(targetFrames(), 400);
+      flushAudio();
+      if (!ok) {
+        onSongEnd();
+      } else if (api.elapsed() !== before) {
+        lastElapsed = api.elapsed();
       }
-      if (steps) lastElapsed = api.elapsed();
       updateTime();
     };
     tick();
@@ -258,12 +335,17 @@
 
     const schedule = () => {
       if (state.stopped || !state.running) { state.pumping = false; return; }
-      const low = ringFrames() < targetFrames() / 2;
+      // Tick quickly: without pthreads the audio thread and the renderer share
+      // the main thread, so the loop has to refill in small, frequent steps to
+      // ride out a slow frame.  It tightens further when the queue runs low.
+      const held = bufferedFrames();
+      const target = targetFrames();
+      const interval = held < target / 2 ? 2 : 8;
       pumpTimer = setTimeout(() => {
         if (state.stopped || !state.running) { state.pumping = false; return; }
         tick();
         schedule();
-      }, low ? 2 : 20);
+      }, interval);
     };
     schedule();
   }
@@ -274,7 +356,7 @@
     const dur = api.duration();
     const mm = (t) => `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
     // The buffer setting itself is shown next to its slider below the canvas.
-    const filledMs = ringFrames() / SAMPLE_RATE * 1000;
+    const filledMs = bufferedFrames() / SAMPLE_RATE * 1000;
     setStatus(`再生中 ${mm(el)} / ${dur > 0 ? mm(dur) : '--:--'} ・ 実バッファ ${filledMs.toFixed(0)}ms` +
       (state.underruns ? ` ・ <span class="warn">underrun ${state.underruns}</span>` : ''));
   }
@@ -282,9 +364,12 @@
   // -------------------------------------------------------------- playback
 
   function resetRing() {
-    if (!state.ring) return;
-    Atomics.store(state.ring, 1, Atomics.load(state.ring, 0));
-    Atomics.store(state.ring, 3, 0);
+    if (!state.node) return;
+    state.node.port.postMessage({ type: 'reset' });
+    state.produced = 0;
+    state.consumed = 0;
+    state.pending = null;
+    state.pendingFrames = 0;
     state.underruns = 0;
   }
 
@@ -311,7 +396,7 @@
       return;
     }
     state.loadedRaw = raw;
-    state.currentIndex = state.files.findIndex((f) => f.name === raw.name);
+    state.currentIndex = state.files.findIndex((f) => (f.path || f.name) === (raw.path || raw.name));
     if (state.currentIndex >= 0) songSelect.value = String(state.currentIndex);
     document.title = `MDX Player — ${engineTitle || raw.name}`;
 
@@ -386,30 +471,38 @@
     return res.arrayBuffer();
   }
 
+  // Songs are served one directory per library (songs/SION/…, songs/SION2/…).
+  const DEFAULT_SONG = { name: 'sion00.mdx', path: 'SION/sion00.mdx', pdx: 'SION/SION.pdx' };
+
+  function songUrl(relPath) {
+    return `songs/${relPath.split('/').map(encodeURIComponent).join('/')}`;
+  }
+
   async function defaultSong() {
-    // MHAWK3.MDX requires MHAWK.PDX for its ADPCM samples.
-    const mdx = await fetchBytes('songs/MHAWK3.MDX');
-    let pdx = null;
+    // Fall back to SION2 if the SION set is not present.
     try {
-      pdx = await fetchBytes('songs/MHAWK.PDX');
+      return await loadSongEntry(DEFAULT_SONG);
     } catch (e) {
-      pdx = null;
+      if (state.files.length > 0) {
+        return loadSongEntry(state.files[0]);
+      }
+      throw e;
     }
-    return { mdx, pdx, name: 'MHAWK3.MDX', title: '' };
   }
 
   async function loadSongEntry(entry) {
+    const rel = entry.path || entry.name;
     setStatus(`${entry.name} を読み込み中…`);
-    const mdx = await fetchBytes(`songs/${encodeURIComponent(entry.name)}`);
+    const mdx = await fetchBytes(songUrl(rel));
     let pdx = null;
     if (entry.pdx) {
       try {
-        pdx = await fetchBytes(`songs/${encodeURIComponent(entry.pdx)}`);
+        pdx = await fetchBytes(songUrl(entry.pdx));
       } catch (e) {
         pdx = null;
       }
     }
-    return { mdx, pdx, name: entry.name, title: entry.title || '' };
+    return { mdx, pdx, name: entry.name, path: rel, title: entry.title || '' };
   }
 
   // ------------------------------------------------------------------- boot
@@ -418,12 +511,6 @@
     await ready;
     bindApi(window.Module);
     api.verbose(1);
-
-    if (!crossOriginIsolated || typeof SharedArrayBuffer === 'undefined') {
-      setStatus('SharedArrayBuffer が使えません。Cross-Origin-Isolation 対応のサーバーで開いてください ' +
-        '(web/serve.js を使用)。', 'err');
-      return;
-    }
 
     // The spectrum setting determines the layout width, so apply it first and
     // size the canvas to match (hiding the spectrum narrows the window).
@@ -437,24 +524,33 @@
     state.ready = true;
     playBtn.disabled = false;
     overlayBtn.textContent = 'クリックして再生';
-    setStatus('準備完了 — MHAWK3.MDX を再生します');
+    setStatus('準備完了');
 
-    // Song list (only available when the dev server exposes it).
+    // Song list.  On a static host this is built when dist/ is assembled; the
+    // dev server generates it on the fly.
     try {
       const res = await fetch('songs/index.json');
       if (res.ok) {
         state.files = await res.json();
+        const label = (f) => (f.title ? f.title.replace(/</g, '&lt;') : f.name).trim();
         songSelect.innerHTML = state.files
-          .map((f, i) => `<option value="${i}">${f.title ? f.title.replace(/</g, '&lt;') : f.name}</option>`)
+          .map((f, i) => `<option value="${i}">${label(f)}</option>`)
           .join('');
-        const i = state.files.findIndex((f) => f.name === 'MHAWK3.MDX');
-        if (i >= 0) songSelect.value = String(i);
+        const di = state.files.findIndex((f) => (f.path || f.name) === DEFAULT_SONG.path);
+        if (di >= 0) songSelect.value = String(di);
       }
     } catch (e) {
-      songSelect.innerHTML = '<option>MHAWK3.MDX</option>';
+      songSelect.innerHTML = `<option>${DEFAULT_SONG.name}</option>`;
     }
 
-    // Auto-start with MHAWK3.MDX once the user gestures (browser autoplay rule).
+    if (state.files.length === 0) {
+      // No songs bundled with this build; let the user open one.
+      setStatus('同梱の曲がありません — 「ファイルを開く…」で .mdx / .pdx を選んでください');
+      overlayBtn.textContent = 'クリックして起動';
+      return;
+    }
+
+    // Auto-start with the default song once the user gestures (autoplay rule).
     try {
       const raw = await defaultSong();
       state.pendingRaw = raw;
@@ -576,7 +672,7 @@
     api,
     state,
     ready,
-    ringFrames,
+    bufferedFrames,
     play,
     stop,
     loadSongEntry,

@@ -19,17 +19,23 @@ open http://127.0.0.1:8099/   →  MHAWK3.MDX plays with the visualizer
 # 1. build the engine (needs the toolchain in tools/, see below)
 ./web/build.sh
 
-# 2. serve web/dist/ with the COOP/COEP headers SharedArrayBuffer requires
+# 2. collect the sample songs from a local MDX collection
+./web/setup_songs.sh                    # SION + SION2 -> web/songs/
+
+# 3. serve web/dist/ with the COOP/COEP headers the fast transport uses
 node web/serve.js                       # http://127.0.0.1:8099/
 
-# 3. optional: automated end-to-end check in a real browser
+# 4. optional: automated end-to-end check in a real browser
 node web/verify.js
 ```
 
-`web/serve.js` serves the built files, the AudioWorklet and the MDX/PDX files.
-By default it looks for songs in `../../mdx/metalhawk` (i.e.
-`/Users/<you>/mdx/metalhawk`); override with `--songs /path/to/mdx/dir`. The page
-lets you pick any of the MDX files it finds, or open a local `.mdx`/`.pdx` pair.
+`web/serve.js` serves the built site, the AudioWorklet and the songs in
+`web/songs/` (one directory per library: SION, SION2). Pass
+`--songs /path/to/mdx/dir` to serve a single directory of MDX files instead. The
+page lets you pick any song it finds, or open a local `.mdx`/`.pdx` pair.
+
+The default song is `SION/sion00.mdx` ("KISS YOU UP"); SION2 and the rest of the
+SION set are in the song picker.
 
 ## What was ported
 
@@ -63,6 +69,42 @@ new layout is built.
 `Visualizer::setSpectrumEnabled()` implements this: it skips both the drawing and
 the FFT work in `Visualizer::updateWaveform()`. The waveform and keyboard
 displays are unaffected, and the native tool keeps the spectrum on.
+
+## Publishing on GitHub Pages
+
+```shell
+./web/build.sh
+./web/setup_songs.sh
+./web/build_pages.sh     # assembles web/pages/ (self-contained static site)
+```
+
+`web/pages/` is a plain static site with relative paths throughout, so it can be
+published from a repository subpath such as `https://user.github.io/mdx2wav/`.
+Copy it to `docs/` and select that as the Pages source, or push it to a
+`gh-pages` branch. `.github/workflows/pages.yml` does the same thing on push,
+building the engine with the Emscripten action; it publishes without songs
+because they are copyrighted, in which case the page starts with the file
+picker.
+
+GitHub Pages cannot send the COOP/COEP headers, so the page uses its message
+transport there — which is why the engine is built without `-pthread`.
+
+### Audio transport
+
+Two transports feed the AudioWorklet:
+
+* **shared** – a `SharedArrayBuffer` ring the engine writes into from the main
+  thread. Lowest overhead, and what the dev server uses. Requires the page to be
+  served with `Cross-Origin-Opener-Policy: same-origin` and
+  `Cross-Origin-Embedder-Policy: require-corp`.
+* **message** – sample blocks are accumulated into ~200 ms batches and
+  transferred to the worklet with `postMessage`. Works on any static host. The
+  worklet reports how many frames it has played, so a dropped message cannot
+  leave the producer believing the queue is full.
+
+The page picks automatically: shared when `SharedArrayBuffer` is available and
+the page is cross-origin isolated, message otherwise. `?transport=shared` or
+`?transport=message` forces one, which is useful for testing.
 
 ### Buffer / latency
 
@@ -102,10 +144,14 @@ Then:
   at `-O2` (about 7× at `-O0`). Reaching `-O2` required fixing real undefined
   behaviour in the shared sources — see "Source changes outside `web/`" below;
   before those fixes the optimiser turned it into a trapping `unreachable`.
-* `-sSTACK_SIZE` / `-sDEFAULT_PTHREAD_STACK_SIZE` are set to 32 MB. The
-  visualiser keeps large `YM2151State::Channel` arrays on the stack.
-* `-pthread` + `-sPTHREAD_POOL_SIZE=8`. Emscripten needs a worker thread to run
-  `main` so that SDL2 can own the browser main thread.
+* `-sSTACK_SIZE` is set to 32 MB: the visualiser keeps large
+  `YM2151State::Channel` arrays on the stack.
+* **No `-pthread`.** Emscripten's pthread runtime needs `SharedArrayBuffer` even
+  to start its worker pool (`DataCloneError: ... requires
+  self.crossOriginIsolated`), which a static host such as GitHub Pages cannot
+  provide. The engine does all of its work synchronously in the step function, so
+  it builds and runs single threaded; only the audio transport needed changing
+  (see "Audio transport" below).
 
 ## Source changes outside `web/`
 

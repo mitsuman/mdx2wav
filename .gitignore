@@ -6,3 +6,7 @@
 /web/dist/
 /web/build/
 /web/verify-out/
+
+# GitHub Pages output and the copyrighted sample songs (see web/setup_songs.sh)
+/web/pages/
+/web/songs/
