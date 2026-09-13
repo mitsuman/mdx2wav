@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MDX Player (WebAssembly) — mdx2wav</title>
+<style>
+  :root {
+    --bg: #05050f;
+    --panel: #101024;
+    --text: #cdd6f4;
+    --accent: #66ccff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  }
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid #24244a;
+  }
+  h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .04em; }
+  h1 small { color: #8888aa; font-weight: 400; }
+  .spacer { flex: 1; }
+  button, select {
+    font: inherit;
+    font-size: 13px;
+    color: var(--text);
+    background: #1b1b38;
+    border: 1px solid #34345f;
+    border-radius: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+  button:hover:not(:disabled), select:hover { background: #24244a; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: #1d4f7a; border-color: #2c79b8; }
+  button.primary:hover:not(:disabled) { background: #256694; }
+  main { padding: 12px 16px 24px; }
+  #screen {
+    display: block;
+    border: 1px solid #24244a;
+    border-radius: 8px;
+    background: #0a0a28;
+    max-width: 100%;
+    image-rendering: pixelated;
+  }
+  #status {
+    font-size: 12px;
+    color: #8f93b8;
+    min-height: 1.4em;
+    font-variant-numeric: tabular-nums;
+  }
+  #status .warn { color: #ffbe6b; }
+  #status .err { color: #ff7b7b; }
+  .hint { margin-top: 10px; font-size: 12px; color: #6f7396; line-height: 1.7; }
+  label.check { display: flex; align-items: center; gap: 5px; font-size: 13px; color: #aab0d0; cursor: pointer; user-select: none; }
+  label.check input { accent-color: #2c79b8; cursor: pointer; }
+  .statusbar { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-top: 10px; }
+  .statusbar #status { margin-top: 0; }
+  label.buffer { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #8f93b8; white-space: nowrap; }
+  label.buffer input[type=range] { width: 180px; accent-color: #2c79b8; cursor: pointer; }
+  label.buffer output { font-variant-numeric: tabular-nums; min-width: 54px; color: #cdd6f4; }
+  kbd {
+    background: #1b1b38; border: 1px solid #34345f; border-bottom-width: 2px;
+    border-radius: 4px; padding: 0 5px; font-size: 11px; font-family: ui-monospace, monospace;
+  }
+  .overlay {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(5, 5, 15, .82); border-radius: 8px;
+  }
+  .screen-wrap { position: relative; display: inline-block; }
+  .overlay button { font-size: 16px; padding: 12px 24px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MDX Player <small>mdx2wav → WebAssembly</small></h1>
+  <div class="spacer"></div>
+  <label class="check" title="スペクトラム表示は1フレームあたり16回のFFTを行うため重くなります">
+    <input type="checkbox" id="spectrum"> スペアナ
+  </label>
+  <label>曲:
+    <select id="song"></select>
+  </label>
+  <button id="play" class="primary" disabled>▶ 再生</button>
+  <button id="stop" disabled>■ 停止</button>
+  <button id="file-btn">ファイルを開く…</button>
+  <input type="file" id="file" accept=".mdx,.MDX,.pdx,.PDX" multiple hidden>
+</header>
+
+<main>
+  <div class="screen-wrap">
+    <canvas id="screen" width="1400" height="880"></canvas>
+    <div class="overlay" id="overlay">
+      <button id="overlay-btn">クリックして起動</button>
+    </div>
+  </div>
+  <div class="statusbar">
+    <div id="status">読み込み中…</div>
+    <label class="buffer" title="大きくすると音が途切れにくくなりますが、画面と音のずれ（遅延）が増えます">
+      バッファ
+      <input type="range" id="buffer" min="30" max="1500" step="10">
+      <output id="buffer-value">250ms</output>
+    </label>
+  </div>
+  <div class="hint">
+    ビジュアライザ内のキー操作: <kbd>↑</kbd><kbd>↓</kbd> 曲送り / <kbd>C</kbd> 最初から / <kbd>X</kbd> レジスタ書き込み一時停止 /
+    <kbd>B</kbd> Timer B / <kbd>M</kbd> YM2151ミュート / <kbd>Esc</kbd> 終了<br>
+    A-K 行で YM2151 を演奏できます（ピアノ鍵盤）。<br>
+    スペアナは1フレームあたり16回のFFTを行うため重い処理です。既定ではオフになっています。
+  </div>
+</main>
+
+<script src="mdxweb.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
