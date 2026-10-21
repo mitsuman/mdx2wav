@@ -14,6 +14,7 @@
 
 #include "../gamdx/mxdrvg/mxdrvg.h"
 #include "command_line_parser.h"
+#include "spc/spc_player.h"
 
 #ifdef __APPLE__
 #include "platform_mac.h"
@@ -22,6 +23,7 @@
 #ifdef ENABLE_VISUALIZER
 #include "visualizer/visualizer.h"
 #include "visualizer/ym2151_state.h"
+#include "spc/spc_visualizer.h"
 #include "../gamdx/mxdrvg/opm_visualizer.h"
 #include "../gamdx/mxdrvg/pcm8_visualizer.h"
 #include <pthread.h>
@@ -31,6 +33,35 @@
 
 bool verbose = false;
 bool g_continuous_playback = false;
+
+#ifdef __APPLE__
+// The AudioQueue callback runs on its own thread.  SPC state is shared with
+// the visualizer, so both generation and state snapshots take this lock.
+static SPCPlayer* g_spc_audio_player = nullptr;
+static pthread_mutex_t g_spc_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static int SpcAudioFill(short* out, int frames) {
+  pthread_mutex_lock(&g_spc_audio_mutex);
+  int len = 0;
+  if (g_spc_audio_player && !g_spc_audio_player->IsFinished()) {
+    len = g_spc_audio_player->Generate((int16_t*)out, frames);
+  }
+  if (verbose && len > 0) {
+    static bool reported = false;
+    if (!reported) {
+      int peak = 0;
+      for (int i = 0; i < len * 2; i++) {
+        const int v = out[i] < 0 ? -out[i] : out[i];
+        if (v > peak) peak = v;
+      }
+      fprintf(stderr, "SPC audio callback: %d frames, first peak %d\n", len, peak);
+      reported = true;
+    }
+  }
+  pthread_mutex_unlock(&g_spc_audio_mutex);
+  return len;
+}
+#endif
 
 typedef unsigned char u8;
 typedef unsigned int u32;
@@ -46,6 +77,47 @@ void strcpy_cnv(char *dst, const char *src, int mode) {
       c;
   }
   *dst = 0;
+}
+
+static bool ends_with_ci(const char* text, const char* suffix) {
+  if (!text || !suffix) return false;
+  const size_t text_len = strlen(text);
+  const size_t suffix_len = strlen(suffix);
+  if (text_len < suffix_len) return false;
+  const char* tail = text + text_len - suffix_len;
+  for (size_t i = 0; i < suffix_len; i++) {
+    if (tolower((unsigned char)tail[i]) != tolower((unsigned char)suffix[i])) return false;
+  }
+  return true;
+}
+
+// SPC files are recognised by extension, with a signature check for files that
+// were renamed or have no extension.
+static bool is_spc_path(const char* path) {
+  if (ends_with_ci(path, ".spc")) return true;
+  FILE* f = fopen(path, "rb");
+  if (!f) return false;
+  char signature[27];
+  const size_t got = fread(signature, 1, sizeof(signature), f);
+  fclose(f);
+  static const char kSpcSignature[] = "SNES-SPC700 Sound File Data";
+  return got == sizeof(signature) && memcmp(signature, kSpcSignature, sizeof(signature)) == 0;
+}
+
+static bool read_file_exact(const char* name, std::vector<unsigned char>* out) {
+  if (!out) return false;
+  out->clear();
+  FILE* f = fopen(name, "rb");
+  if (!f) return false;
+  if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return false; }
+  const long size = ftell(f);
+  if (size <= 0) { fclose(f); return false; }
+  rewind(f);
+  out->resize((size_t)size);
+  const size_t got = fread(out->data(), 1, out->size(), f);
+  fclose(f);
+  if (got != out->size()) { out->clear(); return false; }
+  return true;
 }
 
 bool read_file(const char *name, int *fsize, u8 **fdata, int offset) {
@@ -66,6 +138,10 @@ bool read_file(const char *name, int *fsize, u8 **fdata, int offset) {
       fprintf(stderr, "cannot fstat %s\n", name);
     }
     st.st_size = 128 * 1024; // set tentative file size
+  } else if (!S_ISREG(st.st_mode)) {
+    fprintf(stderr, "Not a regular file: %s\n", name);
+    close(fd);
+    return false;
   }
 
   int size = st.st_size;
@@ -89,28 +165,33 @@ bool read_file(const char *name, int *fsize, u8 **fdata, int offset) {
     close(fd);
     return false;
   }
-  size = read(fd, data + offset, size);
-
+  const ssize_t got = read(fd, data + offset, size);
   close(fd);
+  if (got < 0) {
+    fprintf(stderr, "Cannot read %s.\n", name);
+    free(data);
+    return false;
+  }
+  size = (int)got;
 
   *fdata = data;
   *fsize = size + offset + kTailPad;
   return true;
 }
 
-// ディレクトリ内のMDX/PDXファイルを列挙
-std::vector<std::string> listMDXFiles(const char* filepath) {
+// ディレクトリ内のMDX/SPCファイルを列挙
+std::vector<std::string> listMusicFiles(const char* filepath) {
   std::vector<std::string> files;
-  
+
   // まず、パスがディレクトリかファイルかを確認
   struct stat path_stat;
   if (stat(filepath, &path_stat) != 0) {
     return files;
   }
-  
+
   std::string dir_path;
   bool is_directory = S_ISDIR(path_stat.st_mode);
-  
+
   if (is_directory) {
     // ディレクトリが直接指定された場合
     dir_path = filepath;
@@ -120,33 +201,36 @@ std::vector<std::string> listMDXFiles(const char* filepath) {
     size_t last_slash = path.find_last_of('/');
     dir_path = (last_slash != std::string::npos) ? path.substr(0, last_slash) : ".";
   }
-  
+
   DIR* dir = opendir(dir_path.c_str());
   if (!dir) {
     return files;
   }
-  
+
   struct dirent* entry;
   while ((entry = readdir(dir)) != nullptr) {
     if (entry->d_type == DT_REG) {
       const char* name = entry->d_name;
       size_t len = strlen(name);
-      
-      // .mdx または .MDX で終わるファイルを追加
-      if (len > 4 && 
-          ((name[len-4] == '.' && name[len-3] == 'm' && name[len-2] == 'd' && name[len-1] == 'x') ||
-           (name[len-4] == '.' && name[len-3] == 'M' && name[len-2] == 'D' && name[len-1] == 'X'))) {
+
+      // .mdx / .spc (case insensitive) を追加
+      if ((len > 4 &&
+           ((name[len-4] == '.' && name[len-3] == 'm' && name[len-2] == 'd' && name[len-1] == 'x') ||
+            (name[len-4] == '.' && name[len-3] == 'M' && name[len-2] == 'D' && name[len-1] == 'X'))) ||
+          (len > 4 &&
+           ((name[len-4] == '.' && name[len-3] == 's' && name[len-2] == 'p' && name[len-1] == 'c') ||
+            (name[len-4] == '.' && name[len-3] == 'S' && name[len-2] == 'P' && name[len-1] == 'C')))) {
         std::string fullpath = dir_path + "/" + name;
         files.push_back(fullpath);
       }
     }
   }
-  
+
   closedir(dir);
-  
+
   // ソート
   std::sort(files.begin(), files.end());
-  
+
   return files;
 }
 
@@ -294,15 +378,16 @@ void version() {
 
 void help() {
   printf(
-    "Usage: mdx2wav [options] <file>\n"
-    "Convert mdx file to 16bit stereo raw pcm and write it to stdout.\n"
+    "Usage: mdx2wav [options] <file.mdx|file.spc>\n"
+    "Convert an MDX or SPC music file to 16bit stereo raw pcm on stdout.\n"
     " if you need to convert to other format, use ffmpeg like a following.\n"
     "  mdx2wav xxx.mdx | ffmpeg -f s16le -ar 44.1k -ac 2 -i - xxx.wav\n"
     " if you want to listen now, use aplay like a following.\n"
     "  mdx2wav xxx.mdx | aplay -f cd\n"
     "Options:\n"
-    "  -d <sec>  : limit song duration. 0 means nolimit. (default:300)\n"
-    "  -e <type> : set ym2151 emulation type, fmgen or mame. (default:fmgen)\n"
+    "  -d <sec>  : limit song duration. 0 means nolimit. (default:300; for SPC the\n"
+    "              ID666 length is used when present)\n"
+    "  -e <type> : set ym2151 emulation type, fmgen or mame. (default:fmgen, MDX only)\n"
     "  -f        : enable fadeout.\n"
 #ifdef ENABLE_VISUALIZER
     "  -g        : enable visualizer (requires SDL2).\n"
@@ -313,13 +398,13 @@ void help() {
     "  --adpcm-ch <n>      : set number of ADPCM channels to display (1-8, default:8).\n"
     "  --waveform-scale <n>: set waveform amplitude scale (0.1-10.0, default:1.0).\n"
 #endif
-    "  -l <loop> : set loop limit. (default:2)\n"
+    "  -l <loop> : set loop limit. (default:2, MDX only; SPC loops are controlled by the SPC program)\n"
     "  -m        : measure play time as sec.\n"
 #ifdef __APPLE__
     "  -p        : play directly to audio device (macOS only).\n"
 #endif
     "  -r <rate> : set sampling rate. (default:44100)\n"
-    "  -t        : get song title (charset is SHIFT-JIS).\n"
+    "  -t        : get song title (charset is SHIFT-JIS; SPC ID666 tags are raw bytes).\n"
     "              if you need other charset, try following command:\n"
     "               mdx2wav -t xxx.mdx | iconv -f SHIFT-JIS -t utf-8\n"
     "  -v        : print version.\n"
@@ -400,21 +485,27 @@ int main(int argc, char **argv) {
     help();
     return 0;
   }
-  
+
+  // The selected path has to outlive the local file list.
+  std::string selected_file;
+
   // ディレクトリが指定された場合の処理（ビジュアライザー無効時）
-#ifndef ENABLE_VISUALIZER
-  struct stat path_stat;
-  if (stat(mdx_name, &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) {
-    std::vector<std::string> file_list = listMDXFiles(mdx_name);
-    if (!file_list.empty()) {
-      mdx_name = file_list[0].c_str();
-      fprintf(stderr, "Directory specified. Playing first file: %s\n", mdx_name);
-    } else {
-      fprintf(stderr, "No MDX files found in directory: %s\n", mdx_name);
-      return -1;
+  if (!enable_visualizer) {
+    struct stat path_stat;
+    if (stat(mdx_name, &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) {
+      std::vector<std::string> file_list = listMusicFiles(mdx_name);
+      if (!file_list.empty()) {
+        selected_file = file_list[0];
+        mdx_name = selected_file.c_str();
+        fprintf(stderr, "Directory specified. Playing first file: %s\n", mdx_name);
+      } else {
+        fprintf(stderr, "No MDX/SPC files found in directory: %s\n", mdx_name);
+        return -1;
+      }
     }
   }
-#endif
+
+  bool is_spc = is_spc_path(mdx_name);
 
   if (0 == strcmp(ym2151_type, "fmgen")) {
   } else if (0 == strcmp(ym2151_type, "mame")) {
@@ -430,16 +521,16 @@ int main(int argc, char **argv) {
   OPM_Delegate* opm_original = nullptr;
   OPMVisualizer* opm_wrapper = nullptr;
   PCM8Visualizer* pcm8_wrapper = nullptr;
-  
+
   // ファイルリストを準備（ビジュアライザー用）
   std::vector<std::string> file_list;
   std::vector<const char*> file_ptrs;
   int current_file_index = 0;
-  
+
   if (enable_visualizer) {
     // ディレクトリ内のMDXファイルを列挙
-    file_list = listMDXFiles(mdx_name);
-    
+    file_list = listMusicFiles(mdx_name);
+
     // ディレクトリが指定された場合、最初のファイルを再生
     struct stat path_stat;
     if (stat(mdx_name, &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) {
@@ -448,7 +539,7 @@ int main(int argc, char **argv) {
         current_file_index = 0;
         fprintf(stderr, "Directory specified. Playing first file: %s\n", mdx_name);
       } else {
-        fprintf(stderr, "No MDX files found in directory: %s\n", mdx_name);
+        fprintf(stderr, "No MDX/SPC files found in directory: %s\n", mdx_name);
         return -1;
       }
     } else {
@@ -461,26 +552,37 @@ int main(int argc, char **argv) {
         }
       }
     }
-    
+
+    is_spc = is_spc_path(mdx_name);
+
     // YM2151状態管理オブジェクト作成
     ym_state = new YM2151State();
-    
+    ym_state->setSPCMode(is_spc);
+
     // ウィンドウの高さを計算（表示チャンネル数に応じて調整）
     // タイトル: 50px, Timer情報: 15px, 区切り線: 10px = 75px
     // YM2151チャンネル: 70px/ch
     // ADPCMチャンネル: 45px/ch
     // 下部余白: 20px
-    int window_height = 75 + (ym2151_channels * 70) + (adpcm_channels * 45) + 20;
-    
+    // The SPC layout uses the same tall window so its status panel fits, but
+    // it has no ADPCM section.
+    if (is_spc) {
+      ym2151_channels = 8;
+      adpcm_channels = 0;
+    }
+    int window_height = is_spc
+        ? 720
+        : 75 + (ym2151_channels * 70) + (adpcm_channels * 45) + 20;
+
     // 動画モードの場合は高さを偶数に調整（H.264要件）
     if (video_filename && (window_height % 2) != 0) {
       window_height++;
     }
-    
+
     // ビジュアライザー初期化
     visualizer = new Visualizer();
     bool init_success = false;
-    
+
     if (video_filename) {
       // 動画録画モード
       init_success = visualizer->initVideoMode(video_filename, 1400, window_height, video_fps, SAMPLE_RATE);
@@ -493,7 +595,8 @@ int main(int argc, char **argv) {
       fprintf(stderr, "Video recording mode: %s (%dfps)\n", video_filename, video_fps);
     } else {
       // 通常の表示モード
-      init_success = visualizer->init("MDX Visualizer", 1400, window_height);
+      init_success = visualizer->init(is_spc ? "SPC Visualizer" : "MDX Visualizer",
+                                      1400, window_height);
       if (!init_success) {
         fprintf(stderr, "Failed to initialize visualizer\n");
         delete visualizer;
@@ -501,20 +604,22 @@ int main(int argc, char **argv) {
         return -1;
       }
     }
-    
+
     visualizer->setState(ym_state);
-    
+    visualizer->setSPCMode(is_spc);
+
     // 表示チャンネル数を設定
-    visualizer->setDisplayChannels(ym2151_channels, adpcm_channels);
-    
+    visualizer->setDisplayChannels(is_spc ? 8 : ym2151_channels,
+                                  is_spc ? 0 : adpcm_channels);
+
     // 波形スケールを設定
     visualizer->setWaveformScale(ym2151_waveform_scale, adpcm_waveform_scale);
-    
+
     // スペクトラムデバッグモードを設定
     if (spectrum_debug_filename) {
       visualizer->setSpectrumDebug(spectrum_debug_filename);
     }
-    
+
     // ファイルリストを設定
     if (!file_list.empty()) {
       for (const auto& f : file_list) {
@@ -522,14 +627,14 @@ int main(int argc, char **argv) {
       }
       visualizer->setFileList(file_ptrs.data(), file_ptrs.size(), current_file_index);
     }
-    
+
     // スクリーンショット専用モードの設定
     if (screenshot_filename) {
       visualizer->setScreenshotMode(screenshot_filename);
     }
   }
 #endif
-  
+
 #ifdef ENABLE_VISUALIZER
   // OPM_Delegateをラップしてレジスタ監視を有効化
   if (enable_visualizer && ym_state) {
@@ -537,64 +642,123 @@ int main(int argc, char **argv) {
     if (opm_original) {
       opm_wrapper = new OPMVisualizer(opm_original, ym_state);
       MXDRVG_SetOPMDelegate(opm_wrapper);
-      
+
       // Visualizerとの連携を設定 (ミュート機能とキーボード演奏のため)
       if (visualizer) {
         opm_wrapper->setVisualizer(visualizer);
         visualizer->setOPMWrapper(opm_wrapper);
       }
-      
+
       if (verbose) {
         fprintf(stderr, "YM2151 register monitoring enabled\n");
       }
     }
-    
+
     // PCM8をラップしてADPCM再生を監視
     pcm8_wrapper = new PCM8Visualizer(ym_state);
     MXDRVG_SetPCM8(pcm8_wrapper);
-    
+
     if (verbose) {
       fprintf(stderr, "PCM8 ADPCM monitoring enabled\n");
     }
   }
 #endif
 
-  MXDRVG_Start(SAMPLE_RATE, filter_mode, MDX_BUF_SIZE, PDX_BUF_SIZE);
-  MXDRVG_TotalVolume(256);
-  
+  SPCPlayer* spc_player = nullptr;
+  bool mdx_started = false;
+
+  if (!is_spc) {
+    MXDRVG_Start(SAMPLE_RATE, filter_mode, MDX_BUF_SIZE, PDX_BUF_SIZE);
+    MXDRVG_TotalVolume(256);
+    mdx_started = true;
+  }
+
   // visualizerモードでは連続再生を有効化
   g_continuous_playback = enable_visualizer;
-  
+
   short *audio_buf = new short [AUDIO_BUF_SAMPLES * 2];
 
 #ifdef __APPLE__
   AudioContext audioCtx = {0};
-  if (play_audio) {
-    // Direct audio playback mode
-    if (!initAudioQueue(&audioCtx, SAMPLE_RATE, AUDIO_BUF_SAMPLES)) {
-      fprintf(stderr, "Failed to initialize audio playback.\n");
-      MXDRVG_End();
-      delete []audio_buf;
-      return -1;
-    }
-    
-    if (verbose) {
-      fprintf(stderr, "Playing audio... (Press Ctrl+C to stop)\n");
-    }
-  }
+  bool audio_queue_initialized = false;
 #endif
 
 reload_file:
-  // ファイル切り替え時はMXDRVGのみリセット
-  MXDRVG_End();
-  MXDRVG_Start(SAMPLE_RATE, filter_mode, MDX_BUF_SIZE, PDX_BUF_SIZE);
-  MXDRVG_TotalVolume(256);
-  
+  // A directory may contain both formats; decide again for every file.
+  is_spc = is_spc_path(mdx_name);
+
+#ifdef ENABLE_VISUALIZER
+  if (visualizer) {
+    visualizer->setSPCMode(is_spc);
+    visualizer->setDisplayChannels(is_spc ? 8 : ym2151_channels,
+                                  is_spc ? 0 : adpcm_channels);
+  }
+  if (ym_state) {
+    ym_state->reset();
+    ym_state->setSPCMode(is_spc);
+  }
+#endif
+
+  // ファイル切り替え時はエンジンをリセット
+  if (mdx_started) {
+    MXDRVG_End();
+    mdx_started = false;
+  }
+  if (!is_spc) {
+    MXDRVG_Start(SAMPLE_RATE, filter_mode, MDX_BUF_SIZE, PDX_BUF_SIZE);
+    MXDRVG_TotalVolume(256);
+    mdx_started = true;
+  }
+
   char title[256];
+  title[0] = 0;
   unsigned int pdx_size = 0;
 
-  if (!LoadMDX(mdx_name, title, sizeof(title), &pdx_size)) {
-    return -1;
+  if (is_spc) {
+    std::vector<unsigned char> spc_data;
+    if (!read_file_exact(mdx_name, &spc_data)) {
+      fprintf(stderr, "Cannot open/read %s.\n", mdx_name);
+      return -1;
+    }
+    if (!spc_player) {
+      spc_player = new SPCPlayer();
+#ifdef __APPLE__
+      g_spc_audio_player = spc_player;
+#endif
+    }
+#ifdef __APPLE__
+    pthread_mutex_lock(&g_spc_audio_mutex);
+#endif
+    std::string spc_error;
+    bool spc_loaded = spc_player->Load(spc_data.data(), spc_data.size(), &spc_error);
+    if (spc_loaded) {
+      spc_player->SetSampleRate(SAMPLE_RATE);
+      spc_player->Start(loop, max_song_duration, fadeout ? 3.0 : 0.0);
+    }
+#ifdef __APPLE__
+    pthread_mutex_unlock(&g_spc_audio_mutex);
+#endif
+    if (!spc_loaded) {
+      fprintf(stderr, "Cannot load SPC %s: %s\n", mdx_name, spc_error.c_str());
+      return -1;
+    }
+    strncpy(title, spc_player->Title(), sizeof(title) - 1);
+    title[sizeof(title) - 1] = 0;
+    if (title[0] == 0) {
+      const char* base = strrchr(mdx_name, '/');
+      strncpy(title, base ? base + 1 : mdx_name, sizeof(title) - 1);
+      title[sizeof(title) - 1] = 0;
+    }
+#ifdef __APPLE__
+    setAudioPCMFillFunc(SpcAudioFill);
+#endif
+  } else {
+#ifdef __APPLE__
+    setAudioPCMFillFunc(nullptr);
+#endif
+    if (!LoadMDX(mdx_name, title, sizeof(title), &pdx_size)) {
+      return -1;
+    }
   }
 
 #ifdef ENABLE_VISUALIZER
@@ -603,7 +767,7 @@ reload_file:
     visualizer->setSongTitle(title);
     visualizer->setFilename(mdx_name);
     visualizer->resetElapsedTime();
-    
+
     // ファイルリストのインデックスを更新
     if (!file_list.empty()) {
       std::vector<const char*> file_ptrs;
@@ -612,13 +776,15 @@ reload_file:
       }
       visualizer->setFileList(file_ptrs.data(), file_ptrs.size(), current_file_index);
     }
-    
-    // ADPCM全体バッファ情報を取得して設定
-    void* adpcm_buffer = MXDRVG_GetADPCMBuffer();
-    ym_state->setADPCMBufferInfo(adpcm_buffer, pdx_size);
-    
-    if (verbose) {
-      fprintf(stderr, "ADPCM buffer: %p, size: %u bytes (PDX data size)\n", adpcm_buffer, pdx_size);
+
+    if (!is_spc) {
+      // ADPCM全体バッファ情報を取得して設定
+      void* adpcm_buffer = MXDRVG_GetADPCMBuffer();
+      ym_state->setADPCMBufferInfo(adpcm_buffer, pdx_size);
+
+      if (verbose) {
+        fprintf(stderr, "ADPCM buffer: %p, size: %u bytes (PDX data size)\n", adpcm_buffer, pdx_size);
+      }
     }
   }
 #endif
@@ -628,10 +794,15 @@ reload_file:
     return 0;
   }
 
-  float song_duration = MXDRVG_MeasurePlayTime(loop, fadeout) / 1000.0f;
-  // Warning: MXDRVG_MeasurePlayTime calls MXDRVG_End internaly,
-  //          thus we need to call MXDRVG_PlayAt due to reset playing status.
-  MXDRVG_PlayAt(0, loop, fadeout);
+  float song_duration = 0.0f;
+  if (is_spc) {
+    song_duration = (float)spc_player->Duration();
+  } else {
+    song_duration = MXDRVG_MeasurePlayTime(loop, fadeout) / 1000.0f;
+    // Warning: MXDRVG_MeasurePlayTime calls MXDRVG_End internaly,
+    //          thus we need to call MXDRVG_PlayAt due to reset playing status.
+    MXDRVG_PlayAt(0, loop, fadeout);
+  }
 
   if (measure_play_time) {
     printf("%d\n", (int) ceilf(song_duration));
@@ -648,56 +819,94 @@ reload_file:
     }
   }
 
+  // In direct playback mode the audio callback advances the song clock.  The
+  // loop below only drives the UI, so its 10 ms-per-iteration duration check
+  // would cut the song short; let the callback decide when it ends.
+  if (play_audio) {
+    song_duration = 0.0f;
+  }
+
+#ifdef __APPLE__
+  if (play_audio && !audio_queue_initialized) {
+    // Start the queue only after the song is loaded (and, for SPC, after
+    // SPCPlayer::Start()), so the callback never sees a half-loaded engine.
+    if (!initAudioQueue(&audioCtx, SAMPLE_RATE, AUDIO_BUF_SAMPLES)) {
+      fprintf(stderr, "Failed to initialize audio playback.\n");
+      if (mdx_started) MXDRVG_End();
+      delete spc_player;
+      delete []audio_buf;
+      return -1;
+    }
+    audio_queue_initialized = true;
+    if (verbose) {
+      fprintf(stderr, "Playing audio... (Press Ctrl+C to stop)\n");
+    }
+  }
+#endif
+
   // Main loop
   double total_audio_time = 0.0;  // 動画モード用: 累積オーディオ時間
   int video_frames_rendered = 0;   // 動画モード用: レンダリング済みフレーム数
-  
+
   for (int i = 0; song_duration == 0.0f || 1.0f * i * AUDIO_BUF_SAMPLES / SAMPLE_RATE < song_duration; i++) {
 #ifdef ENABLE_VISUALIZER
     // 動画モード: 累積オーディオ時間で正確に制御
     if (song_duration > 0.0f && total_audio_time >= song_duration) {
       break;
     }
-    
-    // fmgenからEG情報を更新
-    if (enable_visualizer && ym_state && opm_original) {
-      void* opm_ptr = opm_original->GetOPMPointer();
-      if (opm_ptr) {
-        ym_state->updateFromFmgen(opm_ptr);
-        // visualizerにOPMポインタを設定（Timerトグル用）
-        if (visualizer) {
-          visualizer->setOPMPointer(opm_ptr);
+
+    // fmgen / S-DSP から表示用の状態を更新
+    if (enable_visualizer && ym_state) {
+      if (is_spc) {
+        if (spc_player) {
+#ifdef __APPLE__
+          pthread_mutex_lock(&g_spc_audio_mutex);
+#endif
+          UpdateSPCVisualizerState(*spc_player, ym_state);
+#ifdef __APPLE__
+          pthread_mutex_unlock(&g_spc_audio_mutex);
+#endif
+        }
+      } else if (opm_original) {
+        void* opm_ptr = opm_original->GetOPMPointer();
+        if (opm_ptr) {
+          ym_state->updateFromFmgen(opm_ptr);
+          // visualizerにOPMポインタを設定（Timerトグル用）
+          if (visualizer) {
+            visualizer->setOPMPointer(opm_ptr);
+          }
         }
       }
     }
-    
+
     // Update visualizer (must be on main thread for macOS)
     if (enable_visualizer && visualizer && !video_filename) {
       // 通常モード: 既存の処理
       // MXDRVGの一時停止状態を適用
       static bool last_pause_state = false;
+      static bool spc_paused = false;
       bool current_pause_state = visualizer->isMXDRVGPaused();
       if (current_pause_state != last_pause_state) {
-        if (current_pause_state) {
+        if (is_spc) {
+          spc_paused = current_pause_state;
+        } else if (current_pause_state) {
           MXDRVG_Pause();  // レジスタ書き込みを停止
         } else {
           MXDRVG_Cont();   // レジスタ書き込みを再開
         }
         last_pause_state = current_pause_state;
       }
-      
       visualizer->update();
-        
+
         // 曲の再スタート要求をチェック
         if (visualizer->hasRestartRequest()) {
           visualizer->clearRestartRequest();
-          
+
           // 現在の曲を頭から再生
           fprintf(stderr, "\nRestarting song: %s\n", mdx_name);
-          MXDRVG_End();
           goto reload_file;
         }
-        
+
         // ファイル切り替え要求をチェック
         if (visualizer->hasFileChangeRequest()) {
           int new_index = visualizer->getRequestedFileIndex();
@@ -705,29 +914,38 @@ reload_file:
             mdx_name = file_list[new_index].c_str();
             current_file_index = new_index;
             visualizer->clearFileChangeRequest();
-            
+
             // 再生を停止して新しいファイルをロード
             fprintf(stderr, "\nSwitching to: %s\n", mdx_name);
             // ファイル切り替え時は完全にリセット
-            MXDRVG_End();
             goto reload_file;
           }
         }
-        
+
         if (!visualizer->isRunning()) {
           break;
+        }
+        if (is_spc && spc_paused) {
+          usleep(16 * 1000);
+          continue;
         }
     }
 #endif
 
     // ビジュアライザー使用時は曲の終了を無視（ファイル切り替えや手動終了まで継続）
     // ただし動画録画モードの場合は曲終了を検知して停止
-#ifdef ENABLE_VISUALIZER
-    if (!enable_visualizer || video_filename)
-#endif
-    {
-      if (MXDRVG_GetTerminated()) {
+    if (is_spc) {
+      if (!play_audio && spc_player && spc_player->IsFinished()) {
         break;
+      }
+    } else {
+#ifdef ENABLE_VISUALIZER
+      if (!enable_visualizer || video_filename)
+#endif
+      {
+        if (MXDRVG_GetTerminated()) {
+          break;
+        }
       }
     }
 
@@ -743,9 +961,11 @@ reload_file:
         }
         pthread_mutex_unlock(&audioCtx.buffer_mutex);
       }
-      
-      // ビジュアライザー使用時は曲の終了でも停止しない（duration指定がない場合）
-      if (!enable_visualizer)
+
+      // The SPC player has a defined duration (ID666 or -d), so stop when its
+      // callback finishes even with the visualizer.  MDX visualizer playback
+      // stays continuous as before.
+      if (!enable_visualizer || is_spc)
 #endif
       {
         if (audioCtx.terminated) {
@@ -753,7 +973,7 @@ reload_file:
           break;
         }
       }
-      SDL_Delay(16); // ~60fps for visualizer
+      usleep(16 * 1000); // ~60fps for visualizer
       continue;
     }
 #endif
@@ -773,8 +993,14 @@ reload_file:
       }
     }
 #endif
-    
-    int len = MXDRVG_GetPCM(audio_buf, samples_to_get);
+
+    int len;
+    if (is_spc) {
+      if (!spc_player || spc_player->IsFinished()) break;
+      len = spc_player->Generate((int16_t*)audio_buf, samples_to_get);
+    } else {
+      len = MXDRVG_GetPCM(audio_buf, samples_to_get);
+    }
     if (len <= 0) {
       break;
     }
@@ -803,14 +1029,14 @@ reload_file:
     // 動画録画モード: オーディオサンプルを先に更新してからフレームをレンダリング
     if (enable_visualizer && visualizer) {
       visualizer->updateWaveform(audio_buf, len);
-      
+
       if (video_filename) {
         // 動画モード: オーディオ時間を累積
         total_audio_time += (double)len / SAMPLE_RATE;
-        
+
         // 次のビデオフレームをレンダリングする時刻を計算
         double next_frame_time = (video_frames_rendered + 1) / (double)video_fps;
-        
+
         // オーディオ時間が次のフレーム時刻を超えた場合、フレームをレンダリング
         while (total_audio_time >= next_frame_time) {
           if (!visualizer->renderVideoFrame()) {
@@ -830,14 +1056,22 @@ reload_file:
   }
 
 #ifdef __APPLE__
-  if (play_audio) {
+  if (play_audio && audio_queue_initialized) {
     cleanupAudioQueue(&audioCtx);
   }
+  setAudioPCMFillFunc(nullptr);
+  pthread_mutex_lock(&g_spc_audio_mutex);
+  g_spc_audio_player = nullptr;
+  pthread_mutex_unlock(&g_spc_audio_mutex);
 #endif
 
   delete []audio_buf;
 
-  MXDRVG_End();
+  if (mdx_started) {
+    MXDRVG_End();
+  }
+  delete spc_player;
+  spc_player = nullptr;
 
 #ifdef ENABLE_VISUALIZER
   if (enable_visualizer) {

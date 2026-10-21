@@ -1,8 +1,10 @@
 # mdx2wav
 
-mdx2wav is a converter to make raw pcm data from MDX file on Linux.
+mdx2wav is a converter to make raw pcm data from MDX and SPC music files.
 
-MDX is a major sound format of Sharp X68000 in the 1990s.
+MDX is a major sound format of Sharp X68000 in the 1990s.  SPC is the
+SNES APU dump format, containing an SPC700 program and S-DSP state; it is
+played with Blargg's snes_spc emulator.
 
 ## Usage
 
@@ -19,16 +21,28 @@ mdx2wav xxx.mdx | ffmpeg -f s16le -ar 44.1k -ac 2 -i - xxx.wav
 mdx2wav xxx.mdx | ffmpeg -f s16le -ar 44.1k -ac 2 -i - -ab 192 -f ogg file.ogg
 ```
 
+SPC files use the same pipeline:
+```shell
+mdx2wav song.spc | ffmpeg -f s16le -ar 44.1k -ac 2 -i - song.wav
+mdx2wav -g song.spc                 # SDL2 visualizer (8 S-DSP voices)
+mdx2wav -t song.spc                 # ID666 title
+```
+The S-DSP runs at 32 kHz and is band-limited upsampled to the requested rate
+(44.1 kHz by default).  SPC has no reliable song-length field, so playback is
+capped by `-d` (default 300 s); the ID666 "seconds until fadeout" value is used
+when present.  `-l` is an MDX-only option because the SPC program controls its
+own looping.
+
 ### Options
 
 ```shell
   -d <sec>  : limit song duration. 0 means nolimit. (default:300)
   -e <type> : set ym2151 emulation type, fmgen or mame. (default:fmgen)
   -f        : enable fadeout.
-  -l <loop> : set loop limit. (default:2)
+  -l <loop> : set loop limit. (default:2, MDX only)
   -m        : measure play time as sec.
   -r <rate> : set sampling rate. (default:44100)
-  -t        : get song title (charset is SHIFT-JIS).
+  -t        : get song title (charset is SHIFT-JIS; SPC ID666 tags are raw).
               if you need other charset, try following command:
                mdx2wav -t xxx.mdx | iconv -f SHIFT-JIS -t utf-8
   -v        : print version.
@@ -59,5 +73,15 @@ node web/verify.js        # headless end-to-end check
 ```
 
 See [web/README.md](web/README.md) for the build requirements and details. The
-browser output is sample-for-sample identical to the native `mdx2wav` for the
-first seconds of playback.
+browser output is bit-exact with the native `mdx2wav` for MDX, and within one
+LSB on a handful of samples for SPC, over the first seconds of playback.
+
+## SPC support
+
+`gamdx/snes_spc/` contains Blargg's snes_spc 0.9.0 (LGPL-2.1-or-later) with
+small read-only accessors added for the visualizer.  See
+[gamdx/snes_spc/README.md](gamdx/snes_spc/README.md).  The SPC layout shows all
+eight voices with note, pitch, envelope, source/loop addresses, decoded BRR
+waveform, keyboard, per-voice spectrum, and the global S-DSP status (master and
+echo volumes, KON, directory, program counter).  On macOS, `-p` direct audio
+playback works for SPC too; combine it with `-g` for sound and the visualizer.

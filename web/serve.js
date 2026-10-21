@@ -36,7 +36,22 @@ const MIME = {
   '.png': 'image/png',
   '.mdx': 'application/octet-stream',
   '.pdx': 'application/octet-stream',
+  '.spc': 'application/octet-stream',
 };
+
+// ID666 song title (Shift_JIS), used to label SPC entries in the song picker.
+function spcTitle(file) {
+  try {
+    const b = fs.readFileSync(file);
+    if (b.length < 0x4E || b[0x23] === 0) return '';
+    let end = 0x2E;
+    while (end < 0x4E && b[end] !== 0) end++;
+    return new TextDecoder('shift_jis').decode(b.subarray(0x2E, end))
+      .replace(/[\r\n\0]/g, '').trim();
+  } catch (e) {
+    return '';
+  }
+}
 
 function readLibrary(dir, prefix) {
   let names = [];
@@ -46,10 +61,21 @@ function readLibrary(dir, prefix) {
     return [];
   }
   const pdx = names.find((n) => /\.pdx$/i.test(n)) || null;
-  return names
+  const entries = names
     .filter((n) => /\.mdx$/i.test(n))
     .sort()
     .map((name) => ({ name, path: `${prefix}${name}`, pdx: pdx ? `${prefix}${pdx}` : null, title: '' }));
+  // SPC files are self-contained, so they do not need a PDX companion.
+  const spc = names
+    .filter((n) => /\.spc$/i.test(n))
+    .sort()
+    .map((name) => ({
+      name,
+      path: `${prefix}${name}`,
+      pdx: null,
+      title: spcTitle(path.join(dir, name)),
+    }));
+  return entries.concat(spc);
 }
 
 // Each immediate subdirectory of SONGS_DIR is a library; if there are no

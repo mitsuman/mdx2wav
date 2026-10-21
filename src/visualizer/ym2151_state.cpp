@@ -29,7 +29,8 @@ static const bool carrier_table[8][4] = {
 };
 
 YM2151State::YM2151State() 
-    : adpcm_buffer_(nullptr)
+    : spc_mode_(false)
+    , adpcm_buffer_(nullptr)
     , adpcm_buffer_size_(0) {
     pthread_mutex_init(&mutex_, nullptr);
     reset();
@@ -46,6 +47,7 @@ void YM2151State::reset() {
     memset(registers_, 0, sizeof(registers_));
     memset(channel_waveforms_, 0, sizeof(channel_waveforms_));
     memset(channel_waveform_pos_, 0, sizeof(channel_waveform_pos_));
+    memset(&spc_global_, 0, sizeof(spc_global_));
     pthread_mutex_unlock(&mutex_);
 }
 
@@ -378,6 +380,90 @@ void YM2151State::resetRegisterWriteCounts() {
         
         channels_[i].register_writes = 0;
     }
+    pthread_mutex_unlock(&mutex_);
+}
+
+void YM2151State::setSPCMode(bool enabled) {
+    pthread_mutex_lock(&mutex_);
+    spc_mode_ = enabled;
+    pthread_mutex_unlock(&mutex_);
+}
+
+void YM2151State::updateSPCVoice(int ch, bool key_on, bool kon, int note, int volume,
+                                 int left_volume, int right_volume, int pitch,
+                                 int envelope, int envelope_phase, int source_address,
+                                 int loop_address, int brr_address, bool looped,
+                                 const int16_t* waveform, int waveform_samples) {
+    if (ch < 0 || ch >= 8) return;
+
+    pthread_mutex_lock(&mutex_);
+    Channel& c = channels_[ch];
+    c.key_on = key_on;
+    c.note = std::max(0, std::min(127, note));
+    c.velocity = std::max(0, std::min(127, volume));
+    c.left_right = (left_volume > 0 ? 0x80 : 0) | (right_volume > 0 ? 0x40 : 0);
+    // The algorithm number is the channel colour index in the visualizer.
+    c.algorithm = ch;
+    c.operator_mask = 1;
+    c.spc_pitch = (uint16_t)(pitch & 0x3FFF);
+    c.spc_envelope = (uint16_t)(envelope & 0x7FF);
+    c.spc_source = (uint16_t)source_address;
+    c.spc_loop = (uint16_t)loop_address;
+    c.spc_brr = (uint16_t)brr_address;
+    c.spc_env_phase = (uint8_t)envelope_phase;
+    c.spc_kon = kon ? 1 : 0;
+    c.spc_looped = looped ? 1 : 0;
+    c.spc_waveform_samples = (uint16_t)std::max(0, std::min(waveform_samples, CHANNEL_WAVEFORM_SIZE));
+
+    // Fill the fields the shared keyboard/EG drawing code reads.
+    c.operators[0].eg_out = 0x7FF - c.spc_envelope;
+    c.operators[0].eg_level = c.operators[0].eg_out;
+    c.operators[0].key_on = key_on;
+    switch (envelope_phase) {
+        case 0: c.operators[0].eg_phase = 4; break;  // release
+        case 1: c.operators[0].eg_phase = 1; break;  // attack
+        case 2: c.operators[0].eg_phase = 2; break;  // decay
+        case 3: c.operators[0].eg_phase = 3; break;  // sustain
+        default: c.operators[0].eg_phase = 0; break;
+    }
+
+    if (key_on && !c.operators[0].was_key_on) {
+        c.peak_volume = c.velocity / 127.0f;
+        c.display_volume = c.peak_volume;
+    }
+    c.operators[0].was_key_on = key_on;
+
+    if (waveform && waveform_samples > 0) {
+        int copy = std::min(waveform_samples, CHANNEL_WAVEFORM_SIZE);
+        memcpy(channel_waveforms_[ch], waveform, copy * sizeof(int16_t));
+        if (copy < CHANNEL_WAVEFORM_SIZE) {
+            if (looped) {
+                // Fill the display buffer with repetitions of the loop so the
+                // waveform and spectrum spans the whole strip.  Without this
+                // the zero-padded tail made short loops look like a tiny blip.
+                for (int i = copy; i < CHANNEL_WAVEFORM_SIZE; i++) {
+                    channel_waveforms_[ch][i] = channel_waveforms_[ch][i % copy];
+                }
+            } else {
+                memset(channel_waveforms_[ch] + copy, 0,
+                       (CHANNEL_WAVEFORM_SIZE - copy) * sizeof(int16_t));
+            }
+        }
+    } else {
+        memset(channel_waveforms_[ch], 0, sizeof(channel_waveforms_[ch]));
+    }
+    pthread_mutex_unlock(&mutex_);
+}
+
+void YM2151State::setSPCGlobal(const SPCGlobal& global) {
+    pthread_mutex_lock(&mutex_);
+    spc_global_ = global;
+    pthread_mutex_unlock(&mutex_);
+}
+
+void YM2151State::getSPCGlobal(SPCGlobal& out) {
+    pthread_mutex_lock(&mutex_);
+    out = spc_global_;
     pthread_mutex_unlock(&mutex_);
 }
 

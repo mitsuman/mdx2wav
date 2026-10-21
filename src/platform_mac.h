@@ -26,6 +26,11 @@ typedef struct {
   pthread_mutex_t buffer_mutex;
 } AudioContext;
 
+// Optional PCM source.  When set, the audio callback uses it instead of
+// MXDRVG_GetPCM().  Returning 0 or less marks playback as finished.
+typedef int (*AudioPCMFillFunc)(short *out, int frames);
+void setAudioPCMFillFunc(AudioPCMFillFunc func);
+
 bool initAudioQueue(AudioContext *ctx, int sample_rate, int buffer_samples);
 void cleanupAudioQueue(AudioContext *ctx);
 

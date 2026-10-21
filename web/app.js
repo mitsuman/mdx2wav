@@ -107,8 +107,11 @@
     api.configure = mod.cwrap('mdxweb_configure', null,
       ['number', 'number', 'number', 'number']);
     api.verbose = mod.cwrap('mdxweb_verbose', null, ['number']);
+    api.setRender = mod.cwrap('mdxweb_set_render', null, ['number']);
     api.load = mod.cwrap('mdxweb_load', 'number',
       ['number', 'number', 'number', 'number']);
+    api.loadSpc = mod.cwrap('mdxweb_load_spc', 'number', ['number', 'number']);
+    api.isSpc = mod.cwrap('mdxweb_is_spc', 'number', []);
     api.step = mod.cwrap('mdxweb_step', 'number', []);
     api.audioBuffer = mod.cwrap('mdxweb_audio_buffer', 'number', []);
     api.running = mod.cwrap('mdxweb_running', 'number', []);
@@ -141,6 +144,23 @@
       return '';
     }
   }
+
+  // Decode the ID666 song title of an SPC file.  SPC tags are usually ASCII,
+  // but older Japanese dumps use Shift_JIS, which the browser can decode.
+  function decodeSpcTitle(spcBytes) {
+    try {
+      const buf = new Uint8Array(spcBytes);
+      if (buf.length < 0x4e) return '';
+      let end = 0x2e;
+      while (end < 0x4e && buf[end] !== 0) end++;
+      return new TextDecoder('shift_jis').decode(buf.subarray(0x2e, end))
+        .replace(/[\r\n\0]/g, '').trim();
+    } catch (e) {
+      return '';
+    }
+  }
+
+  const isSpcName = (name) => /\.spc$/i.test(name || '');
 
   // ------------------------------------------------------------- audio ring
 
@@ -278,8 +298,18 @@
   }
 
   // Fill the audio thread before unpausing the graph so playback starts clean.
+  // generateUpTo() only runs while the player is marked running, so mark it
+  // running for the duration of the prefill even though pump() has not started.
   function prefill() {
-    return generateUpTo(prebufferFrames(), 4000);
+    const wasRunning = state.running;
+    state.running = true;
+    if (api.setRender) api.setRender(0);
+    try {
+      return generateUpTo(prebufferFrames(), 4000);
+    } finally {
+      if (api.setRender) api.setRender(1);
+      state.running = wasRunning;
+    }
   }
 
   function flushAudio() {
@@ -365,7 +395,16 @@
 
   function resetRing() {
     if (!state.node) return;
-    state.node.port.postMessage({ type: 'reset' });
+    if (state.transport === 'shared' && state.ring) {
+      // Reset the indices synchronously.  A posted reset would race with the
+      // prefill below and could make the worklet discard it.
+      Atomics.store(state.ring, 0, 0);
+      Atomics.store(state.ring, 1, 0);
+      Atomics.store(state.ring, 3, 0);
+      state.node.port.postMessage({ type: 'reset-counters' });
+    } else {
+      state.node.port.postMessage({ type: 'reset' });
+    }
     state.produced = 0;
     state.consumed = 0;
     state.pending = null;
@@ -373,7 +412,30 @@
     state.underruns = 0;
   }
 
+  // The SPC layout is shorter (no ADPCM section).  Rebuild the engine when the
+  // format changes so the canvas is not left with a large empty area.
+  async function ensureLayout(raw) {
+    const wantHeight = raw.spc ? 720 : 880;
+    if (canvas.height === wantHeight) return true;
+    api.shutdown();
+    canvas.height = wantHeight;
+    api.setSpectrum(spectrumToggle.checked ? 1 : 0);
+    canvas.width = api.windowWidth();
+    if (!api.init(8, 8, 1.0, canvas.width, canvas.height)) {
+      setStatus('レイアウトの初期化に失敗しました', 'err');
+      return false;
+    }
+    state.ready = true;
+    return true;
+  }
+
   function loadIntoEngine(raw) {
+    if (raw.spc) {
+      const ptr = copyToHeap(raw.spc);
+      const ok = api.loadSpc(ptr, raw.spc.byteLength);
+      window.Module._free(ptr);
+      return ok;
+    }
     const mdxPtr = copyToHeap(raw.mdx);
     let pdxPtr = 0;
     if (raw.pdx && raw.pdx.byteLength) {
@@ -387,20 +449,25 @@
 
   async function play(raw) {
     await ready;
+    // Stop the previous pump before the engine can be torn down/rebuilt.
+    state.running = false;
+    state.pumping = false;
+    if (pumpTimer) { clearTimeout(pumpTimer); pumpTimer = 0; }
     await initAudio();
+    if (!(await ensureLayout(raw))) return;
 
-    const engineTitle = raw.title || decodeTitle(raw.mdx);
+    const engineTitle = raw.title || (raw.spc ? decodeSpcTitle(raw.spc) : decodeTitle(raw.mdx));
     setStatus('読み込み中…');
+    api.configure(100, 0, 2, 0);
     if (!loadIntoEngine(raw)) {
-      setStatus('MDXの読み込みに失敗しました', 'err');
+      setStatus('ファイルの読み込みに失敗しました', 'err');
       return;
     }
     state.loadedRaw = raw;
     state.currentIndex = state.files.findIndex((f) => (f.path || f.name) === (raw.path || raw.name));
     if (state.currentIndex >= 0) songSelect.value = String(state.currentIndex);
-    document.title = `MDX Player — ${engineTitle || raw.name}`;
+    document.title = `MDX/SPC Player — ${engineTitle || raw.name}`;
 
-    api.configure(100, 0, 2, 0);
     resetRing();
     prefill();
     await state.ctx.resume();
@@ -493,7 +560,10 @@
   async function loadSongEntry(entry) {
     const rel = entry.path || entry.name;
     setStatus(`${entry.name} を読み込み中…`);
-    const mdx = await fetchBytes(songUrl(rel));
+    const data = await fetchBytes(songUrl(rel));
+    if (isSpcName(rel)) {
+      return { spc: data, name: entry.name, path: rel, title: entry.title || '' };
+    }
     let pdx = null;
     if (entry.pdx) {
       try {
@@ -502,7 +572,7 @@
         pdx = null;
       }
     }
-    return { mdx, pdx, name: entry.name, path: rel, title: entry.title || '' };
+    return { mdx: data, pdx, name: entry.name, path: rel, title: entry.title || '' };
   }
 
   // ------------------------------------------------------------------- boot
@@ -545,7 +615,7 @@
 
     if (state.files.length === 0) {
       // No songs bundled with this build; let the user open one.
-      setStatus('同梱の曲がありません — 「ファイルを開く…」で .mdx / .pdx を選んでください');
+      setStatus('同梱の曲がありません — 「ファイルを開く…」で .mdx / .pdx / .spc を選んでください');
       overlayBtn.textContent = 'クリックして起動';
       return;
     }
@@ -641,20 +711,23 @@
   fileInput.addEventListener('change', async () => {
     const files = Array.from(fileInput.files || []);
     if (files.length === 0) return;
+    const spcFile = files.find((f) => /\.spc$/i.test(f.name));
     const mdxFile = files.find((f) => /\.mdx$/i.test(f.name));
     const pdxFile = files.find((f) => /\.pdx$/i.test(f.name));
-    if (!mdxFile) {
-      setStatus('.mdx ファイルを選んでください', 'err');
+    if (!spcFile && !mdxFile) {
+      setStatus('.mdx / .pdx / .spc ファイルを選んでください', 'err');
       return;
     }
     state.files = [];
     songSelect.innerHTML = '<option>ローカルファイル</option>';
-    const raw = {
-      mdx: await mdxFile.arrayBuffer(),
-      pdx: pdxFile ? await pdxFile.arrayBuffer() : null,
-      name: mdxFile.name,
-      title: '',
-    };
+    const raw = spcFile
+      ? { spc: await spcFile.arrayBuffer(), name: spcFile.name, title: '' }
+      : {
+          mdx: await mdxFile.arrayBuffer(),
+          pdx: pdxFile ? await pdxFile.arrayBuffer() : null,
+          name: mdxFile.name,
+          title: '',
+        };
     await play(raw);
   });
 

@@ -39,6 +39,7 @@ Visualizer::Visualizer()
     : window_(nullptr)
     , renderer_(nullptr)
     , state_(nullptr)
+    , spc_mode_(false)
     , opm_ptr_(nullptr)
     , opm_wrapper_(nullptr)
     , running_(false)
@@ -81,6 +82,7 @@ Visualizer::Visualizer()
     , adpcm_waveform_scale_(1.0f)
     , spectrum_enabled_(true)
     , window_width_(WINDOW_WIDTH_WITH_SPECTRUM)
+    , window_height_(0)
     , spectrum_debug_file_(nullptr)
     , spectrum_debug_frame_count_(0) {
     song_title_[0] = '\0';
@@ -246,6 +248,7 @@ bool Visualizer::init(const char* title, int width, int height) {
         return false;
     }
     window_width_ = width;
+    window_height_ = height;
     
     // ウィンドウ作成
     window_ = SDL_CreateWindow(
@@ -317,6 +320,7 @@ bool Visualizer::initVideoMode(const char* video_filename, int width, int height
     video_height_ = height;
     video_fps_ = fps;
     window_width_ = width;
+    window_height_ = height;
     
     // SDL初期化（オフスクリーンレンダリング用）
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -417,7 +421,22 @@ void Visualizer::updateWaveform(const short* samples, int count) {
     }
     
     // チャンネルごとにスペクトラムアナライザにデータを渡す
-    if (analyze_spectrum && opm_ptr_) {
+    if (analyze_spectrum && spc_mode_ && state_) {
+        // SPC voices: the visualizer state already carries the decoded BRR
+        // waveform for each voice, so no access to the DSP is needed here.
+        const int waveform_samples = YM2151State::CHANNEL_WAVEFORM_SIZE;
+        int16_t mono[YM2151State::CHANNEL_WAVEFORM_SIZE];
+        int16_t stereo[YM2151State::CHANNEL_WAVEFORM_SIZE * 2];
+        for (int ch = 0; ch < 8; ch++) {
+            if (!spectrum_analyzers_[ch]) continue;
+            state_->getChannelWaveform(ch, mono, waveform_samples);
+            for (int i = 0; i < waveform_samples; i++) {
+                stereo[i * 2] = mono[i];
+                stereo[i * 2 + 1] = mono[i];
+            }
+            spectrum_analyzers_[ch]->processAudio(stereo, waveform_samples);
+        }
+    } else if (analyze_spectrum && opm_ptr_) {
         FM::OPM* opm = (FM::OPM*)opm_ptr_;
         
         // YM2151の各チャンネル（0-7）の波形を取得
@@ -439,7 +458,7 @@ void Visualizer::updateWaveform(const short* samples, int count) {
     }
     
     // ADPCM用（各チャンネルの波形を個別に解析）
-    if (analyze_spectrum && state_) {
+    if (analyze_spectrum && state_ && !spc_mode_) {
         YM2151State::ADPCMChannel adpcm_channels[8];
         state_->getAllADPCMChannels(adpcm_channels);
         const int waveform_samples = sizeof(adpcm_channels[0].waveform) / sizeof(int16_t);
@@ -1611,12 +1630,32 @@ void Visualizer::renderTitle() {
 
 void Visualizer::renderTimerInfo() {
     if (!state_) return;
+
+    int y = 44;
+    int x = 10;
+
+    if (spc_mode_) {
+        renderBitmapText("SUPER NINTENDO / SPC700 + S-DSP / mdx2wav SPC support by mtm",
+                         x, y, 120, 170, 230);
+
+        YM2151State::SPCGlobal g;
+        state_->getSPCGlobal(g);
+        char info[64];
+        snprintf(info, sizeof(info), "MSTR:%03d/%03d ECHO:%03d/%03d",
+                 g.master_volume_left, g.master_volume_right,
+                 g.echo_volume_left, g.echo_volume_right);
+        renderBitmapText(info, x + 640, y, 100, 200, 160);
+
+        snprintf(info, sizeof(info), "KON:%02X PC:%04X", g.key_on_mask & 0xFF, g.cpu_pc & 0xFFFF);
+        renderBitmapText(info, x + 880, y, 100, 200, 160);
+
+        SDL_SetRenderDrawColor(renderer_, 60, 70, 100, 255);
+        SDL_RenderDrawLine(renderer_, 0, y + 10, window_width_, y + 10);
+        return;
+    }
     
     YM2151State::TimerState timer;
     state_->getTimerState(timer);
-    
-    int y = 44;
-    int x = 10;
     
     // システム情報を表示（TIMER-Aと同じ行）
     renderBitmapText("SHARP X68000 / MXDRV 2.06+17 Rel.X5-S / MXDRVg V1.50a / mdx2wav 20251225 by mtm", x, y, 100, 140, 200);
@@ -1666,6 +1705,11 @@ void Visualizer::renderTimerInfo() {
 
 void Visualizer::renderChannelInfo() {
     if (!state_) return;
+
+    if (spc_mode_) {
+        renderSPCChannelInfo();
+        return;
+    }
     
     YM2151State::Channel channels[8];
     state_->getAllChannels(channels);
@@ -2010,7 +2054,7 @@ void Visualizer::renderKeyboard() {
         int base_y = start_y + ch * line_height;
         
         // Key Fractionインジケーター（鍵盤の左横）
-        {
+        if (!spc_mode_) {
             int indicator_x = base_x - 10;  // 鍵盤の左10px
             int indicator_center_y = base_y + white_key_height;
             int indicator_range = white_key_height - 2;  // 上下の可動範囲
@@ -2047,7 +2091,8 @@ void Visualizer::renderKeyboard() {
                 
                 SDL_Rect key_rect = {x, base_y, white_key_width - 1, white_key_height-2};
                 
-                bool pressed = (channel.note == midi_note);
+                bool pressed = (spc_mode_ ? channel.key_on : true) &&
+                               (channel.note == midi_note);
                 
                 if (pressed) {
                     SDL_SetRenderDrawColor(renderer_, r, g, b, 255);
@@ -2100,7 +2145,7 @@ void Visualizer::renderKeyboard() {
         
         // 各オペレータのMUL/Detune適用後の周波数を横線で表示（接続関係を示す）
         //if (channel.key_on) // keyonじゃなくても表示する。offの後release時も音が出ているため
-        {
+        if (!spc_mode_) {
             // KF (0-63) による周波数オフセットを計算
             // KFは1半音を64分割する (64 KF = 1半音 = 100セント)
             float kf_cents = (channel.key_fraction / 64.0f) * 100.0f;  // 0-100セント

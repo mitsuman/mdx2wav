@@ -7,18 +7,36 @@
 #include <pthread.h>
 #include "../gamdx/mxdrvg/mxdrvg.h"
 
+static AudioPCMFillFunc g_audio_fill = nullptr;
+
+void setAudioPCMFillFunc(AudioPCMFillFunc func) {
+  g_audio_fill = func;
+}
+
 static void audioCallback(void *userData, AudioQueueRef queue, AudioQueueBufferRef buffer) {
   AudioContext *ctx = (AudioContext *)userData;
   
   // continuous playbackモードでは曲終了を無視
-  if (!ctx->playing || (!g_continuous_playback && (ctx->terminated || MXDRVG_GetTerminated()))) {
+  if (!ctx->playing) {
     ctx->terminated = true;
     pthread_cond_signal(&ctx->cond);
     return;
   }
-  
+
   short *audio_buf = (short *)buffer->mAudioData;
-  int len = MXDRVG_GetPCM(audio_buf, ctx->buffer_samples);
+  int len;
+  if (g_audio_fill) {
+    // SPC (and any future non-MXDRVG source): the callback owns generation.
+    len = g_audio_fill(audio_buf, ctx->buffer_samples);
+  } else {
+    // continuous playbackモードでは曲終了を無視
+    if (!g_continuous_playback && (ctx->terminated || MXDRVG_GetTerminated())) {
+      ctx->terminated = true;
+      pthread_cond_signal(&ctx->cond);
+      return;
+    }
+    len = MXDRVG_GetPCM(audio_buf, ctx->buffer_samples);
+  }
   
   if (len <= 0) {
     ctx->terminated = true;

@@ -62,6 +62,12 @@ public:
     
     // 状態オブジェクトを設定
     void setState(YM2151State* state);
+
+    // SPC (SNES S-DSP) layout.  The visualizer keeps its keyboard, waveform and
+    // spectrum displays, but the per-channel panel shows S-DSP voices instead
+    // of YM2151 operators.
+    void setSPCMode(bool enabled) { spc_mode_ = enabled; }
+    bool isSPCMode() const { return spc_mode_; }
     
     // OPMチップポインタを設定（Timer制御用）
     void setOPMPointer(void* opm_ptr) { opm_ptr_ = opm_ptr; }
@@ -164,6 +170,7 @@ private:
     SDL_Window* window_;
     SDL_Renderer* renderer_;
     YM2151State* state_;
+    bool spc_mode_;
     void* opm_ptr_;  // OPMチップへのポインタ（Timer制御用）
     void* opm_wrapper_;  // OPMVisualizerラッパー（キーボード演奏用）
     bool running_;
@@ -258,11 +265,14 @@ private:
     float adpcm_waveform_scale_;   // ADPCM波形表示の振幅スケール (1.0 = デフォルト)
     bool spectrum_enabled_;        // スペクトラムアナライザを描画/解析するか
     int window_width_;             // 描画中のウィンドウ幅
+    int window_height_;            // 描画中のウィンドウ高さ
     
     // 描画メソッド
     void renderTitle();
     void renderTimerInfo();
     void renderChannelInfo();
+    void renderSPCChannelInfo();
+    void renderSPCStatus(int y);
     void renderADPCMChannels(int& y);
     void renderKeyboard();
     void renderWaveform();

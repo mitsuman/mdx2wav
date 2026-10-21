@@ -3,11 +3,13 @@
 This directory contains a WebAssembly port of mdx2wav: the original C++ engine
 (MXDRVG + fmgen YM2151 + PCM8 + the SDL2 visualizer) compiled with Emscripten and
 driven from JavaScript, so an MDX file plays with both sound *and* the animated
-visualizer in a normal web page.
+visualizer in a normal web page.  The same page also plays SNES `.spc` files
+through Blargg's SPC700 / S-DSP emulator with an SPC-specific visualizer layout.
 
 The result is bit-for-bit identical to the native `mdx2wav` output for the first
 seconds of playback (see "Verification" below), and the engine runs about 21x
-faster than real time.
+faster than real time (MDX).  SPC playback also matches the native build to
+within one LSB on a handful of samples, which is float-rounding noise.
 
 ```
 open http://127.0.0.1:8099/   →  MHAWK3.MDX plays with the visualizer
@@ -46,6 +48,8 @@ SION set are in the song picker.
 | ADPCM / PCM8 | `gamdx/pcm8` | unchanged |
 | Resampler | `gamdx/downsample` | unchanged |
 | Visualizer | `src/visualizer` | reused through Emscripten's SDL2 / SDL2_ttf / SDL2_image ports |
+| SPC playback | `gamdx/snes_spc`, `src/spc` | Blargg's SPC700 + S-DSP; 32 kHz output resampled to 44.1 kHz |
+| SPC visualizer | `src/visualizer/visualizer_spc.cpp` | eight voices, BRR waveform, S-DSP status |
 | Harness | `web/src/mdxweb.cpp` | new: step-driven loop replacing `src/mdx2wav.cpp`'s `main()` |
 | MDX/PDX loading | `web/src/mdxweb_load.cpp` | new: browser equivalent of `LoadMDX()` |
 | FFmpeg video encoder | `web/src/video_encoder_stub.cpp` | stubbed out; the browser draws to a canvas instead |
@@ -195,7 +199,9 @@ web/
   build.sh                  build engine + page into web/dist/
   build_native_test.sh      build web/test/native_harness_test (host, no SDL)
   serve.js                  dev server (COOP/COEP), song list, worklet
-  verify.js                 headless-browser end-to-end verification
+  verify.js                 headless-browser end-to-end verification (MDX)
+  verify_spc.js             headless-browser end-to-end verification (SPC)
+  tools/make_test_spc.py    generates a small looping SPC test tone
   index.html, app.js        the page: canvas, controls, ring-buffer pump
   worklet/player-processor.js   AudioWorklet that drains the ring
   src/mdxweb.cpp            engine harness / exported API
@@ -218,6 +224,20 @@ web/
 3. writes a screenshot of the canvas to `web/verify-out/screenshot.png`,
 4. renders 3 s of PCM on a **fresh page** and compares it sample by sample with
    the output of the native `build/mdx2wav` binary.
+
+SPC files are not bundled (sample dumps are usually copyrighted), so the SPC
+check generates a tiny looping test tone when no file is given, or accepts a
+real dump with `--song`:
+
+```shell
+node web/verify_spc.js --seconds 5
+node web/verify_spc.js --song /path/to/music.spc --seconds 5
+```
+
+It plays through the page, checks the audio/underrun diagnostics, writes
+`web/verify-out/spc-screenshot.png`, and compares 5 s of PCM with
+`build/mdx2wav -d 5`.  The generator is also usable on its own:
+`python3 web/tools/make_test_spc.py test.spc`.
 
 For MHAWK3.MDX the comparison currently reports:
 

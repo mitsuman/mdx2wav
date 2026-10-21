@@ -39,6 +39,19 @@ node - "$OUT" <<'NODE'
 const fs = require('fs');
 const path = require('path');
 const out = process.argv[2];
+
+function spcTitle(file) {
+  try {
+    const b = fs.readFileSync(file);
+    if (b.length < 0x4E || b[0x23] === 0) return '';
+    let end = 0x2E;
+    while (end < 0x4E && b[end] !== 0) end++;
+    return new TextDecoder('shift_jis').decode(b.subarray(0x2E, end))
+      .replace(/[\r\n\0]/g, '').trim();
+  } catch (e) {
+    return '';
+  }
+}
 const songsDir = path.join(out, 'songs');
 const list = [];
 for (const lib of fs.readdirSync(songsDir).sort()) {
@@ -47,8 +60,16 @@ for (const lib of fs.readdirSync(songsDir).sort()) {
   const files = fs.readdirSync(dir).sort();
   const pdx = files.find((f) => /\.pdx$/i.test(f)) || null;
   for (const f of files) {
-    if (!/\.mdx$/i.test(f)) continue;
-    list.push({ name: f, path: `${lib}/${f}`, pdx: pdx ? `${lib}/${pdx}` : null, title: '' });
+    if (/\.mdx$/i.test(f)) {
+      list.push({ name: f, path: `${lib}/${f}`, pdx: pdx ? `${lib}/${pdx}` : null, title: '' });
+    } else if (/\.spc$/i.test(f)) {
+      list.push({
+        name: f,
+        path: `${lib}/${f}`,
+        pdx: null,
+        title: spcTitle(path.join(dir, f)),
+      });
+    }
   }
 }
 fs.writeFileSync(path.join(songsDir, 'index.json'), JSON.stringify(list, null, 1));

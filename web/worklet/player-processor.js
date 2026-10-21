@@ -57,6 +57,14 @@ class MdxPlayerProcessor extends AudioWorkletProcessor {
         this.underruns = 0;
         break;
 
+      // Shared mode: the main thread has already zeroed the ring indices.
+      // Only the counters need clearing here; touching the indices would
+      // discard samples that were prefilled before this message arrived.
+      case 'reset-counters':
+        this.consumed = 0;
+        this.underruns = 0;
+        break;
+
       case 'samples':
         if (this.mode !== 'message') break;
         this.queue.push(new Int16Array(msg.buffer));

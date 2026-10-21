@@ -24,6 +24,8 @@
 #include "gamdx/mxdrvg/pcm8_visualizer.h"
 #include "src/visualizer/visualizer.h"
 #include "src/visualizer/ym2151_state.h"
+#include "src/spc/spc_player.h"
+#include "src/spc/spc_visualizer.h"
 
 #include <emscripten.h>
 
@@ -52,6 +54,10 @@ bool g_verbose = false;
 // The spectrum analyzers run sixteen FFTs per update, by far the most expensive
 // part of a frame, so the browser build leaves them off unless asked.
 bool g_spectrum_enabled = false;
+// When false, mdxweb_step() still generates audio but skips the per-step
+// visualizer work.  The page uses this while pre-filling the audio ring, so
+// startup is not slowed down by SDL rendering.
+bool g_render_enabled = true;
 
 std::vector<int16_t> g_audio;   // CHUNK_SAMPLES * 2 interleaved samples
 float g_volume = 1.0f;
@@ -82,6 +88,8 @@ struct MDXEngine {
 
   YM2151State* ym_state = nullptr;
   Visualizer* visualizer = nullptr;
+  SPCPlayer* spc_player = nullptr;
+  bool spc_mode = false;
   OPM_Delegate* opm_original = nullptr;
   OPMVisualizer* opm_wrapper = nullptr;
   PCM8Visualizer* pcm8_wrapper = nullptr;
@@ -107,6 +115,9 @@ void mdxweb_configure(int volume_percent, int swap_channels, int loop, int fadeo
 
 EMSCRIPTEN_KEEPALIVE
 void mdxweb_verbose(int enabled) { g_verbose = enabled != 0; }
+
+EMSCRIPTEN_KEEPALIVE
+void mdxweb_set_render(int enabled) { g_render_enabled = enabled != 0; }
 
 // Enable or disable the spectrum analyzers (1 = on).  Disabling also stops the
 // per-channel FFT work in Visualizer::updateWaveform(), and widens the waveform
@@ -156,6 +167,8 @@ int mdxweb_init(int ym2151_channels, int adpcm_channels, float waveform_scale,
   E->frames = 0;
   E->ym_state = nullptr;
   E->visualizer = nullptr;
+  E->spc_player = nullptr;
+  E->spc_mode = false;
   E->opm_original = nullptr;
   E->opm_wrapper = nullptr;
   E->pcm8_wrapper = nullptr;
@@ -186,6 +199,8 @@ int mdxweb_init(int ym2151_channels, int adpcm_channels, float waveform_scale,
     return 0;
   }
   E->visualizer->setState(E->ym_state);
+  E->ym_state->setSPCMode(false);
+  E->visualizer->setSPCMode(false);
   E->visualizer->setDisplayChannels(ym2151_channels, adpcm_channels);
   E->visualizer->setWaveformScale(waveform_scale, waveform_scale);
 
@@ -212,6 +227,12 @@ int mdxweb_load(const u8* mdx, int mdx_size, const u8* pdx, int pdx_size) {
   if (!E || !E->initialized) {
     return 0;
   }
+
+  E->spc_mode = false;
+  E->ym_state->reset();
+  E->ym_state->setSPCMode(false);
+  E->visualizer->setSPCMode(false);
+  E->visualizer->setDisplayChannels(8, 8);
 
   E->title[0] = 0;
   if (!mdxweb_load_data(mdx, mdx_size, pdx, pdx_size, E->title, sizeof(E->title))) {
@@ -242,11 +263,64 @@ int mdxweb_load(const u8* mdx, int mdx_size, const u8* pdx, int pdx_size) {
   return 1;
 }
 
+// Load an SNES .spc image.  SPC files carry a full APU program rather than a
+// song data block, so playback and visualizer state come from SPCPlayer.
+EMSCRIPTEN_KEEPALIVE
+int mdxweb_load_spc(const u8* spc, int spc_size) {
+  if (!E || !E->initialized || !spc || spc_size <= 0) {
+    return 0;
+  }
+
+  if (!E->spc_player) {
+    E->spc_player = new SPCPlayer();
+  }
+
+  std::string error;
+  if (!E->spc_player->Load(spc, (size_t)spc_size, &error)) {
+    Log(("Failed to load SPC: " + error).c_str());
+    return 0;
+  }
+
+  E->spc_player->SetSampleRate(SAMPLE_RATE);
+  E->spc_player->Start(g_loop, 300.0, g_fadeout ? 3.0 : 0.0);
+
+  E->spc_mode = true;
+  E->title[0] = 0;
+  strncpy(E->title, E->spc_player->Title(), sizeof(E->title) - 1);
+  E->title[sizeof(E->title) - 1] = 0;
+
+  E->ym_state->reset();
+  E->ym_state->setSPCMode(true);
+  E->visualizer->setSPCMode(true);
+  E->visualizer->setDisplayChannels(8, 0);
+  E->visualizer->setSongTitle(E->title);
+  E->visualizer->setFilename(g_cb.filename ? g_cb.filename : "");
+  E->visualizer->resetElapsedTime();
+  E->visualizer->clearFileChangeRequest();
+  E->visualizer->clearRestartRequest();
+
+  UpdateSPCVisualizerState(*E->spc_player, E->ym_state);
+
+  E->elapsed = 0.0;
+  E->frames = 0;
+  E->duration = E->spc_player->Duration();
+  E->running = true;
+  E->paused = false;
+  return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE
+int mdxweb_is_spc() { return (E && E->spc_mode) ? 1 : 0; }
+
 EMSCRIPTEN_KEEPALIVE
 void mdxweb_start() {
   if (!E) return;
-  MXDRVG_PlayAt(0, g_loop, g_fadeout);
-  MXDRVG_Cont();
+  if (E->spc_mode && E->spc_player) {
+    E->spc_player->Start(g_loop, 300.0, g_fadeout ? 3.0 : 0.0);
+  } else {
+    MXDRVG_PlayAt(0, g_loop, g_fadeout);
+    MXDRVG_Cont();
+  }
   E->running = true;
   E->elapsed = 0.0;
 }
@@ -255,7 +329,7 @@ EMSCRIPTEN_KEEPALIVE
 void mdxweb_stop() {
   if (!E) return;
   E->running = false;
-  MXDRVG_Pause();
+  if (!E->spc_mode) MXDRVG_Pause();
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -263,10 +337,10 @@ void mdxweb_set_paused(int paused) {
   if (!E) return;
   if (paused && !E->paused) {
     E->paused = true;
-    MXDRVG_Pause();
+    if (!E->spc_mode) MXDRVG_Pause();
   } else if (!paused && E->paused) {
     E->paused = false;
-    MXDRVG_Cont();
+    if (!E->spc_mode) MXDRVG_Cont();
   }
 }
 
@@ -279,11 +353,15 @@ int mdxweb_step() {
   }
 
   const int kRenderEvery = 7;  // ~14 Hz at 100 steps/s: enough for the UI
-  const bool do_render = (E->frames % kRenderEvery) == 0;
+  const bool do_render = g_render_enabled && (E->frames % kRenderEvery) == 0;
 
   if (do_render) {
-    // Keep the visualizer's view of the FM chip in sync with the driver.
-    if (E->opm_original) {
+    // Keep the visualizer's view of the sound chip in sync.
+    if (E->spc_mode) {
+      if (E->spc_player) {
+        UpdateSPCVisualizerState(*E->spc_player, E->ym_state);
+      }
+    } else if (E->opm_original) {
       void* opm_ptr = E->opm_original->GetOPMPointer();
       if (opm_ptr) {
         E->ym_state->updateFromFmgen(opm_ptr);
@@ -304,7 +382,21 @@ int mdxweb_step() {
     return 0;
   }
 
-  int len = MXDRVG_GetPCM((short*)g_audio.data(), CHUNK_SAMPLES);
+  int len;
+  if (E->spc_mode) {
+    if (!E->spc_player) {
+      E->running = false;
+      return 0;
+    }
+    if (E->paused) {
+      memset(g_audio.data(), 0, g_audio.size() * sizeof(int16_t));
+      len = CHUNK_SAMPLES;
+    } else {
+      len = E->spc_player->Generate(g_audio.data(), CHUNK_SAMPLES);
+    }
+  } else {
+    len = MXDRVG_GetPCM((short*)g_audio.data(), CHUNK_SAMPLES);
+  }
   if (len <= 0) {
     E->running = false;
     return 0;
@@ -330,7 +422,11 @@ int mdxweb_step() {
   E->elapsed += (double)len / SAMPLE_RATE;
   E->frames++;
 
-  if (MXDRVG_GetTerminated()) {
+  if (E->spc_mode) {
+    if (E->spc_player && E->spc_player->IsFinished()) {
+      E->running = false;
+    }
+  } else if (MXDRVG_GetTerminated()) {
     E->running = false;
   }
   return len;
@@ -351,10 +447,20 @@ int mdxweb_dump_pcm(short* out, int max_frames) {
   while (written < max_frames) {
     int want = max_frames - written;
     if (want > CHUNK_SAMPLES) want = CHUNK_SAMPLES;
-    int len = MXDRVG_GetPCM(out + written * 2, want);
+    int len;
+    if (E->spc_mode) {
+      if (!E->spc_player) break;
+      len = E->spc_player->Generate(out + written * 2, want);
+    } else {
+      len = MXDRVG_GetPCM(out + written * 2, want);
+    }
     if (len <= 0) break;
     written += len;
-    if (MXDRVG_GetTerminated()) break;
+    if (E->spc_mode) {
+      if (E->spc_player->IsFinished()) break;
+    } else if (MXDRVG_GetTerminated()) {
+      break;
+    }
   }
   return written;
 }
@@ -377,6 +483,9 @@ const char* mdxweb_title() { return E ? E->title : ""; }
 EMSCRIPTEN_KEEPALIVE
 int mdxweb_finished() {
   if (!E) return 1;
+  if (E->spc_mode) {
+    return ((E->spc_player && E->spc_player->IsFinished()) || !E->running) ? 1 : 0;
+  }
   return (MXDRVG_GetTerminated() || !E->running) ? 1 : 0;
 }
 
@@ -406,6 +515,9 @@ void mdxweb_shutdown() {
   E->pcm8_wrapper = nullptr;
   delete E->ym_state;
   E->ym_state = nullptr;
+  delete E->spc_player;
+  E->spc_player = nullptr;
+  E->spc_mode = false;
   mdxweb_free_data();
   E->initialized = false;
 }

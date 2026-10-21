@@ -23,6 +23,13 @@ set(MDX2WAV_SOURCES
 	gamdx/pcm8/pcm8.cpp
 	gamdx/pcm8/x68pcm8.cpp
 	gamdx/mame/ym2151.c
+	src/spc/spc_player.cpp
+	src/spc/spc_resampler.cpp
+	gamdx/snes_spc/SNES_SPC.cpp
+	gamdx/snes_spc/SNES_SPC_misc.cpp
+	gamdx/snes_spc/SNES_SPC_state.cpp
+	gamdx/snes_spc/SPC_DSP.cpp
+	gamdx/snes_spc/SPC_Filter.cpp
 )
 
 if(APPLE)
@@ -48,6 +55,8 @@ if(ENABLE_VISUALIZER)
 		src/visualizer/ym2151_state.cpp
 		src/visualizer/video_encoder.cpp
 		src/visualizer/spectrum_analyzer.cpp
+		src/visualizer/visualizer_spc.cpp
+		src/spc/spc_visualizer.cpp
 		gamdx/mxdrvg/opm_visualizer.cpp
 		gamdx/mxdrvg/pcm8_visualizer.cpp
 	)

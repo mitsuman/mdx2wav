@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MDX Player (WebAssembly) — mdx2wav</title>
+<title>MDX / SPC Player (WebAssembly) — mdx2wav</title>
 <style>
   :root {
     --bg: #05050f;
@@ -83,7 +83,7 @@
 </head>
 <body>
 <header>
-  <h1>MDX Player <small>mdx2wav → WebAssembly</small></h1>
+  <h1>MDX / SPC Player <small>mdx2wav → WebAssembly</small></h1>
   <div class="spacer"></div>
   <label class="check" title="スペクトラム表示は1フレームあたり16回のFFTを行うため重くなります">
     <input type="checkbox" id="spectrum"> スペアナ
@@ -94,7 +94,7 @@
   <button id="play" class="primary" disabled>▶ 再生</button>
   <button id="stop" disabled>■ 停止</button>
   <button id="file-btn">ファイルを開く…</button>
-  <input type="file" id="file" accept=".mdx,.MDX,.pdx,.PDX" multiple hidden>
+  <input type="file" id="file" accept=".mdx,.MDX,.pdx,.PDX,.spc,.SPC" multiple hidden>
 </header>
 
 <main>
@@ -116,6 +116,7 @@
     ビジュアライザ内のキー操作: <kbd>↑</kbd><kbd>↓</kbd> 曲送り / <kbd>C</kbd> 最初から / <kbd>X</kbd> レジスタ書き込み一時停止 /
     <kbd>B</kbd> Timer B / <kbd>M</kbd> YM2151ミュート / <kbd>Esc</kbd> 終了<br>
     A-K 行で YM2151 を演奏できます（ピアノ鍵盤）。<br>
+    .spc（SNES / SPC700 + S-DSP）にも対応しています。SPC では 8 声のサンプル再生と BRR 波形を表示します。<br>
     スペアナは1フレームあたり16回のFFTを行うため重い処理です。既定ではオフになっています。
   </div>
 </main>
