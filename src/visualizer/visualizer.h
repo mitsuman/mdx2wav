@@ -7,6 +7,7 @@
 
 #include <cstdio>
 #include <string>
+#include <vector>
 
 // 前方宣言
 struct SDL_Window;
@@ -114,6 +115,14 @@ public:
     // ファイルリストの設定（titles / dirs は files と同じ要素数。無くてもよい）
     void setFileList(const char** files, const char** titles,
                      const uint8_t* dirs, int count, int current_index);
+
+    // Recently played files (most recent first), shown by the history view.
+    void setHistory(const char** files, int count);
+    int historyCount() const { return (int)history_.size(); }
+    bool isHistoryMode() const { return history_mode_; }
+    bool hasPathChangeRequest() const { return path_change_requested_; }
+    const std::string& getRequestedPath() const { return requested_path_; }
+    void clearPathChangeRequest() { path_change_requested_ = false; }
 
     // Directory currently shown by the filer.
     void setDirectory(const char* path);
@@ -296,6 +305,12 @@ private:
     bool filer_mode_;
     int filer_selection_;
     int filer_scroll_;
+    bool history_mode_;
+    int history_selection_;
+    int history_scroll_;
+    std::vector<std::string> history_;
+    bool path_change_requested_;
+    std::string requested_path_;
     bool file_change_requested_;
     int requested_file_index_;
     bool restart_requested_;
@@ -354,6 +369,7 @@ private:
     // 描画メソッド
     void renderTitle();
     void renderFiler();
+    void ensureHistoryVisible();
     void renderPSF();
     int filerRowCount() const;
     void ensureFilerSelectionVisible();

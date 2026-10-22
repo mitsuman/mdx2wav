@@ -76,6 +76,14 @@ See [web/README.md](web/README.md) for the build requirements and details. The
 browser output is bit-exact with the native `mdx2wav` for MDX, and within one
 LSB on a handful of samples for SPC, over the first seconds of playback.
 
+## Playback history
+
+Pressing `H` in the visualizer opens a history view with the same list UI as
+the filer: the 1024 most recently played files, newest first, chosen with the
+cursor keys and played with Enter.  The list is stored in
+`~/.config/mdx2wav/history.txt` and survives restarts; re-playing a file moves
+it back to the top instead of adding a duplicate.
+
 ## Spectrum analyzer
 
 The per-channel spectrum strip is off by default, which keeps the window at

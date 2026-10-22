@@ -113,6 +113,10 @@ Visualizer::Visualizer()
     , psf_master_left_(0)
     , psf_master_right_(0)
     , psf_reverb_(false)
+    , history_mode_(false)
+    , history_selection_(0)
+    , history_scroll_(0)
+    , path_change_requested_(false)
     , filer_mode_(false)
     , filer_selection_(0)
     , filer_scroll_(0)
@@ -568,6 +572,37 @@ void Visualizer::update() {
         } else if (event.type == SDL_KEYDOWN) {
             const SDL_Keycode sym = event.key.keysym.sym;
 
+            // History view: same list UI as the filer, but recent songs.
+            if (history_mode_) {
+                const int n = (int)history_.size();
+                if (sym == SDLK_UP && n > 0) {
+                    history_selection_ = (history_selection_ - 1 + n) % n;
+                    ensureHistoryVisible();
+                } else if (sym == SDLK_DOWN && n > 0) {
+                    history_selection_ = (history_selection_ + 1) % n;
+                    ensureHistoryVisible();
+                } else if ((sym == SDLK_RETURN || sym == SDLK_KP_ENTER) && n > 0) {
+                    requested_path_ = history_[history_selection_];
+                    path_change_requested_ = true;
+                    history_mode_ = false;
+                    return;
+                } else if (sym == SDLK_ESCAPE || sym == SDLK_h) {
+                    history_mode_ = false;
+                }
+                continue;
+            }
+
+            if (sym == SDLK_h) {
+                if (!history_.empty()) {
+                    history_mode_ = true;
+                    filer_mode_ = false;
+                    history_selection_ = 0;
+                    history_scroll_ = 0;
+                    ensureHistoryVisible();
+                }
+                continue;
+            }
+
             // ファイル一覧（フィルタモード）を開いている間は、この中だけで
             // 操作を完結させる。他のキーは無視する。
             if (filer_mode_) {
@@ -732,8 +767,6 @@ void Visualizer::update() {
                 triggerNote(67, true); // G4
             } else if (event.key.keysym.sym == SDLK_y) {
                 triggerNote(68, true); // G#4
-            } else if (event.key.keysym.sym == SDLK_h) {
-                triggerNote(69, true); // A4
             } else if (event.key.keysym.sym == SDLK_u) {
                 triggerNote(70, true); // A#4
             } else if (event.key.keysym.sym == SDLK_j) {
@@ -771,8 +804,6 @@ void Visualizer::update() {
                 triggerNote(67, false);
             } else if (event.key.keysym.sym == SDLK_y) {
                 triggerNote(68, false);
-            } else if (event.key.keysym.sym == SDLK_h) {
-                triggerNote(69, false);
             } else if (event.key.keysym.sym == SDLK_u) {
                 triggerNote(70, false);
             } else if (event.key.keysym.sym == SDLK_j) {
@@ -1057,6 +1088,30 @@ void Visualizer::setFileList(const char** files, const char** titles,
     filer_selection_ = current_index;
     filer_scroll_ = 0;
     file_change_requested_ = false;
+}
+
+void Visualizer::setHistory(const char** files, int count) {
+    history_.clear();
+    if (files) {
+        for (int i = 0; i < count; i++) {
+            if (files[i] && files[i][0]) history_.push_back(files[i]);
+        }
+    }
+    if (history_selection_ >= (int)history_.size()) {
+        history_selection_ = history_.empty() ? 0 : (int)history_.size() - 1;
+    }
+}
+
+void Visualizer::ensureHistoryVisible() {
+    const int rows = filerRowCount();
+    if (history_selection_ < history_scroll_) {
+        history_scroll_ = history_selection_;
+    } else if (history_selection_ >= history_scroll_ + rows) {
+        history_scroll_ = history_selection_ - rows + 1;
+    }
+    if (history_scroll_ < 0) history_scroll_ = 0;
+    const int max_scroll = std::max(0, (int)history_.size() - rows);
+    if (history_scroll_ > max_scroll) history_scroll_ = max_scroll;
 }
 
 void Visualizer::setDirectory(const char* path) {
@@ -2081,7 +2136,12 @@ void Visualizer::ensureFilerSelectionVisible() {
 
 // ファイル一覧（フィルタモード）。F キーで開閉し、↑↓で選択、Enterで再生。
 void Visualizer::renderFiler() {
-    if (!filer_mode_) return;
+    if (!filer_mode_ && !history_mode_) return;
+
+    const bool hist = history_mode_;
+    const int count = hist ? (int)history_.size() : file_list_count_;
+    const int sel = hist ? history_selection_ : filer_selection_;
+    const int scroll = hist ? history_scroll_ : filer_scroll_;
 
     TTF_Font* font_title = (TTF_Font*)(font_medium_ ? font_medium_ : font_small_);
     TTF_Font* font_row = (TTF_Font*)(font_small_ ? font_small_ : font_medium_);
@@ -2107,13 +2167,18 @@ void Visualizer::renderFiler() {
 
     // ヘッダ
     char header[512];
-    snprintf(header, sizeof(header), "FILE LIST   %s   (%d)",
-             filer_directory_.empty() ? "." : filer_directory_.c_str(),
-             file_list_count_);
+    if (hist) {
+        snprintf(header, sizeof(header), "HISTORY   (%d)", count);
+    } else {
+        snprintf(header, sizeof(header), "FILE LIST   %s   (%d)",
+                 filer_directory_.empty() ? "." : filer_directory_.c_str(),
+                 count);
+    }
     renderText(renderer_, font_title, header, panel_x + 20, panel_y + 10,
                200, 220, 255);
     renderText(renderer_, font_small_,
-               "UP/DOWN: select   ENTER: open/play   LEFT/BACKSPACE: parent   F/ESC: close",
+               hist ? "UP/DOWN: select   ENTER: play   H/ESC: close"
+                    : "UP/DOWN: select   ENTER: open/play   LEFT/BACKSPACE: parent   F/ESC: close",
                panel_x + panel_w - 500, panel_y + 14, 130, 150, 200);
 
     const int row_h = 22;
@@ -2123,16 +2188,17 @@ void Visualizer::renderFiler() {
     const int title_x = panel_x + (int)(panel_w * 0.55);
     const int title_max_w = panel_x + panel_w - title_x - 20;
 
-    if (file_list_count_ == 0) {
-        renderText(renderer_, font_row, "(no music files)", panel_x + 24,
-                   list_y, 120, 130, 160);
+    if (count == 0) {
+        renderText(renderer_, font_row,
+                   hist ? "(no history yet)" : "(no music files)",
+                   panel_x + 24, list_y, 120, 130, 160);
     }
 
     for (int i = 0; i < rows; i++) {
-        const int idx = filer_scroll_ + i;
-        if (idx >= file_list_count_) break;
+        const int idx = scroll + i;
+        if (idx >= count) break;
         const int y = list_y + i * row_h;
-        const bool selected = (idx == filer_selection_);
+        const bool selected = (idx == sel);
 
         if (selected) {
             SDL_Rect hi = {panel_x + 10, y - 2, panel_w - 20, row_h};
@@ -2142,10 +2208,11 @@ void Visualizer::renderFiler() {
             SDL_RenderDrawRect(renderer_, &hi);
         }
 
-        const bool is_dir = file_dirs_ && file_dirs_[idx] != 0;
+        const bool is_dir = !hist && file_dirs_ && file_dirs_[idx] != 0;
+        const char* path = hist ? history_[idx].c_str() : file_list_[idx];
         char line[512];
         snprintf(line, sizeof(line), "%s%s%s", selected ? "> " : "  ",
-                 pathBaseName(file_list_[idx]).c_str(), is_dir ? "/" : "");
+                 pathBaseName(path).c_str(), is_dir ? "/" : "");
         const Uint8 r = selected ? 240 : (is_dir ? 120 : 170);
         const Uint8 g = selected ? 245 : (is_dir ? 220 : 185);
         const Uint8 b = selected ? 255 : (is_dir ? 255 : 210);
@@ -2172,12 +2239,12 @@ void Visualizer::renderFiler() {
             renderText(renderer_, font_row, "<DIR>", title_x, y,
                        selected ? 180 : (Uint8)120, selected ? 220 : (Uint8)200,
                        selected ? 255 : (Uint8)255);
-        } else if (file_titles_ && file_titles_[idx] && file_titles_[idx][0]) {
+        } else if (!hist && file_titles_ && file_titles_[idx] &&
+                   file_titles_[idx][0]) {
             const std::string title = sjisToUtf8(file_titles_[idx]);
             int tw = 0, th = 0;
             if (TTF_SizeUTF8(font_row, title.c_str(), &tw, &th) == 0 &&
                 tw > title_max_w) {
-                // 収まらない分は末尾を省略する
                 std::string clipped = title;
                 while (!clipped.empty()) {
                     clipped.pop_back();
@@ -2198,22 +2265,24 @@ void Visualizer::renderFiler() {
         }
     }
 
-    // フッター: 選択中の曲名
+    // フッター: 選択中の曲명
     const int footer_y = panel_y + panel_h - 26;
-    if (file_list_count_ <= 0) {
+    if (count <= 0) {
         // nothing to show
-    } else if (file_dirs_ && file_dirs_[filer_selection_]) {
+    } else if (hist) {
+        renderText(renderer_, font_small_, pathBaseName(history_[sel].c_str()).c_str(),
+                   panel_x + 20, footer_y, 200, 200, 210);
+    } else if (file_dirs_ && file_dirs_[sel]) {
         renderText(renderer_, font_title,
-                   pathBaseName(file_list_[filer_selection_]).c_str(),
+                   pathBaseName(file_list_[sel]).c_str(),
                    panel_x + 20, footer_y, 140, 200, 255);
-    } else if (file_titles_ && file_titles_[filer_selection_] &&
-        file_titles_[filer_selection_][0]) {
-        const std::string title = sjisToUtf8(file_titles_[filer_selection_]);
+    } else if (file_titles_ && file_titles_[sel] && file_titles_[sel][0]) {
+        const std::string title = sjisToUtf8(file_titles_[sel]);
         renderText(renderer_, font_title, title.c_str(), panel_x + 20, footer_y,
                    255, 230, 160);
     } else {
         renderText(renderer_, font_small_,
-                   pathBaseName(file_list_[filer_selection_]).c_str(),
+                   pathBaseName(file_list_[sel]).c_str(),
                    panel_x + 20, footer_y, 200, 200, 210);
     }
 }

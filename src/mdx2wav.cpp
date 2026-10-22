@@ -366,6 +366,63 @@ std::vector<MusicEntry> listMusicEntries(const std::string& dir_path) {
   return entries;
 }
 
+// --- Playback history (persisted between runs) -----------------------------
+std::string historyPath() {
+  const char* home = getenv("HOME");
+  if (!home) return std::string();
+  return std::string(home) + "/.config/mdx2wav/history.txt";
+}
+
+std::vector<std::string> loadHistory() {
+  std::vector<std::string> out;
+  const std::string path = historyPath();
+  if (path.empty()) return out;
+  FILE* f = fopen(path.c_str(), "r");
+  if (!f) return out;
+  char line[4096];
+  while (fgets(line, sizeof(line), f) != nullptr) {
+    std::string s(line);
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+    if (!s.empty()) out.push_back(s);
+    if (out.size() >= 1024) break;
+  }
+  fclose(f);
+  return out;
+}
+
+void saveHistory(const std::vector<std::string>& history) {
+  const std::string path = historyPath();
+  if (path.empty()) return;
+  const size_t slash = path.find_last_of('/');
+  if (slash != std::string::npos) {
+    const std::string dir = path.substr(0, slash);
+    const size_t parent = dir.find_last_of('/');
+    if (parent != std::string::npos && parent > 0) {
+      mkdir(dir.substr(0, parent).c_str(), 0755);  // e.g. ~/.config
+    }
+    mkdir(dir.c_str(), 0755);  // e.g. ~/.config/mdx2wav
+  }
+  FILE* f = fopen(path.c_str(), "w");
+  if (!f) return;
+  for (const auto& s : history) fprintf(f, "%s\n", s.c_str());
+  fclose(f);
+}
+
+// Add a played file to the front of the history (deduplicated, max 1024).
+void historyAdd(std::vector<std::string>& history, const std::string& path) {
+  const std::string canon = canonicalPath(path);
+  for (auto it = history.begin(); it != history.end();) {
+    if (canonicalPath(*it) == canon) {
+      it = history.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  history.insert(history.begin(), path);
+  if (history.size() > 1024) history.resize(1024);
+  saveHistory(history);
+}
+
 bool LoadMDX(const char *mdx_name, char *title, int title_len, unsigned int *out_pdx_size = nullptr) {
   u8 *mdx_buf = 0, *pdx_buf = 0;
   int mdx_size = 0, pdx_size = 0;
@@ -649,6 +706,9 @@ int main(int argc, char **argv) {
   bool is_spc = is_spc_path(mdx_name);
   bool is_psf = !is_spc && is_psf_path(mdx_name);
 
+  // Recently played files, persisted between runs (up to 1024).
+  std::vector<std::string> history = loadHistory();
+
   if (0 == strcmp(ym2151_type, "fmgen")) {
   } else if (0 == strcmp(ym2151_type, "mame")) {
     MXDRVG_SetEmulationType(MXDRVG_YM2151TYPE_MAME);
@@ -821,6 +881,11 @@ int main(int argc, char **argv) {
                               current_file_index);
     }
     visualizer->setDirectory(music_dir.c_str());
+    {
+      std::vector<const char*> history_ptrs;
+      for (const auto& h : history) history_ptrs.push_back(h.c_str());
+      visualizer->setHistory(history_ptrs.data(), (int)history_ptrs.size());
+    }
 
     // スクリーンショット専用モードの設定
     if (screenshot_filename) {
@@ -1017,6 +1082,16 @@ reload_file:
   }
 #endif
 
+  // Remember this song for the history view.
+  historyAdd(history, mdx_name);
+#ifdef ENABLE_VISUALIZER
+  if (visualizer) {
+    std::vector<const char*> history_ptrs;
+    for (const auto& h : history) history_ptrs.push_back(h.c_str());
+    visualizer->setHistory(history_ptrs.data(), (int)history_ptrs.size());
+  }
+#endif
+
   if (get_title) {
     printf("%s\n", title);
     return 0;
@@ -1073,6 +1148,10 @@ reload_file:
     }
   }
 #endif
+
+  // Holds the path of a file chosen from the history view (mdx_name points
+  // into it until the next switch).
+  std::string requested_path_storage;
 
   // Main loop
   double total_audio_time = 0.0;  // 動画モード用: 累積オーディオ時間
@@ -1173,6 +1252,36 @@ reload_file:
           // 現在の曲を頭から再生
           fprintf(stderr, "\nRestarting song: %s\n", mdx_name);
           goto reload_file;
+        }
+
+        // 履歴から曲が選ばれたら、その曲のフォルダに一覧を作り直して再生する
+        if (visualizer->hasPathChangeRequest()) {
+          const std::string path = visualizer->getRequestedPath();
+          visualizer->clearPathChangeRequest();
+          struct stat st;
+          if (stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+            rebuildFileList(canonicalPath(musicDirectory(path.c_str())));
+            int idx = 0;
+            const std::string canon = canonicalPath(path);
+            for (size_t i = 0; i < file_list.size(); i++) {
+              if (!file_dirs[i] && canonicalPath(file_list[i]) == canon) {
+                idx = (int)i;
+                break;
+              }
+            }
+            visualizer->setFileList(file_ptrs.data(), title_ptrs.data(),
+                                    file_dirs.data(), (int)file_ptrs.size(), idx);
+            visualizer->setDirectory(music_dir.c_str());
+            std::vector<const char*> hp;
+            for (const auto& h : history) hp.push_back(h.c_str());
+            visualizer->setHistory(hp.data(), (int)hp.size());
+            current_file_index = idx;
+            requested_path_storage = path;
+            mdx_name = requested_path_storage.c_str();
+            fprintf(stderr, "\nSwitching to: %s\n", mdx_name);
+            goto reload_file;
+          }
+          fprintf(stderr, "History entry not found: %s\n", path.c_str());
         }
 
         // フィルタでディレクトリ移動が要求されたら一覧を作り直す
