@@ -2628,11 +2628,18 @@ void Visualizer::renderKeyboard() {
     for (int ch = 0; ch < ym2151_display_channels_; ch++) {
         auto& channel = channels[ch];
 
-        // The keyboard position is latched at note-on for SPC.  Pitch changes
-        // after that are shown by the green dot, not by moving the key.  A
-        // note-on is the DSP's KON event, not "the envelope went above zero":
-        // sustained voices are retriggered without ever releasing, so an
-        // envelope edge would leave the key stuck on the first note.
+        // Key-on edge: used for latching the key position and for the
+        // key-on colour.
+        bool key_on_edge = false;
+        if (channel.key_on && !keyboard_key_on_prev_[ch]) key_on_edge = true;
+        keyboard_key_on_prev_[ch] = channel.key_on;
+        if (spc_mode_ && channel.spc_note_on) key_on_edge = true;
+
+        // The keyboard position is latched at note-on for every format; pitch
+        // changes after that are shown elsewhere (operator pitch for MDX, the
+        // green dot for SPC and PSF).  SPC latches on the DSP's KON event, not
+        // "the envelope went above zero", because sustained voices are
+        // retriggered without ever releasing.
         if (spc_mode_) {
             if (channel.spc_note_on) {
                 keyboard_latched_note_[ch] = channel.note > 0 ? channel.note : 0;
@@ -2642,9 +2649,13 @@ void Visualizer::renderKeyboard() {
                 // note-on frame; pick the note up as soon as it is known.
                 keyboard_latched_note_[ch] = channel.note;
             }
+        } else if (key_on_edge && channel.note > 0) {
+            keyboard_latched_note_[ch] = channel.note;
+        } else if (keyboard_latched_note_[ch] == 0 && channel.key_on &&
+                   channel.note > 0) {
+            keyboard_latched_note_[ch] = channel.note;
         }
-        const int keyboard_note = spc_mode_ ? keyboard_latched_note_[ch]
-                                            : channel.note;
+        const int keyboard_note = keyboard_latched_note_[ch];
 
         // SPC notes can exceed the C0-C8 range drawn by default.  Shift this
         // voice's keyboard window up by whole octaves so the note stays on
@@ -2668,13 +2679,6 @@ void Visualizer::renderKeyboard() {
         }
         const int octave_offset = held_offset;
         
-        // Key-on edge: the key must be shown in the key-on colour for at
-        // least one frame, even if the envelope moves on immediately.
-        bool key_on_edge = false;
-        if (channel.key_on && !keyboard_key_on_prev_[ch]) key_on_edge = true;
-        keyboard_key_on_prev_[ch] = channel.key_on;
-        if (spc_mode_ && channel.spc_note_on) key_on_edge = true;
-
         // EGフェーズに基づく色を決定（全オペレータの中で最も進んでいるフェーズを使用）
         int dominant_phase = 0;  // デフォルトはoff
         {
@@ -2760,8 +2764,7 @@ void Visualizer::renderKeyboard() {
                 
                 SDL_Rect key_rect = {x, base_y, white_key_width - 1, white_key_height-2};
                 
-                bool pressed = (spc_mode_ ? (channel.key_on && keyboard_note > 0)
-                                           : true) &&
+                bool pressed = channel.key_on && keyboard_note > 0 &&
                                (keyboard_note == midi_note);
                 
                 if (pressed) {

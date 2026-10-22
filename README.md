@@ -117,8 +117,9 @@ raw PS1 voice levels are only a few percent.  The sample playback position
 bar is one row below it.  Below it a
 thin bar shows the sample playback position (orange point) inside the VAG
 sample, with the loop point as a yellow tick, like the SPC panel.  As in
-the SPC panel the key is latched at note-on and later pitch changes move a
-green dot above the keyboard instead of the key.
+the SPC and MDX panels the key is latched at note-on; later pitch changes move
+a green dot above the keyboard instead of the key (MDX shows them in the
+operator pitch readout and has no dot).
 Notes are derived from the pitch register and the decoded VAG sample's own
 tuning, so they are absolute rather than guessed from the mix.  Only PSF1 is supported (PSF2 would need a
 PS2 emulator), and the web build does not include the PSF core yet.
