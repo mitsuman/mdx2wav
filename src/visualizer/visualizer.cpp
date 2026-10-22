@@ -1254,6 +1254,43 @@ void Visualizer::renderPSF() {
                          f.active ? 170 : 50, f.active ? 175 : 55,
                          f.active ? 220 : 80);
 
+        // L/R pan bar: a marker between the L and R ends, with a centre line.
+        {
+            const int pan_x = x + label_x + 150;
+            const int pan_y = y + 13;
+            const int pan_w = 70;
+            const int pan_h = 9;
+            renderBitmapText("L", pan_x - 7, y + 14,
+                             f.active ? 150 : 60, f.active ? 170 : 70,
+                             f.active ? 220 : 90);
+            renderBitmapText("R", pan_x + pan_w + 2, y + 14,
+                             f.active ? 150 : 60, f.active ? 170 : 70,
+                             f.active ? 220 : 90);
+
+            SDL_Rect bg = {pan_x, pan_y, pan_w, pan_h};
+            SDL_SetRenderDrawColor(renderer_, 30, 30, 50, 255);
+            SDL_RenderFillRect(renderer_, &bg);
+            SDL_SetRenderDrawColor(renderer_, 60, 70, 110, 255);
+            SDL_RenderDrawRect(renderer_, &bg);
+
+            const int center = pan_x + pan_w / 2;
+            SDL_SetRenderDrawColor(renderer_, 120, 130, 170, 255);
+            SDL_RenderDrawLine(renderer_, center, pan_y + 1, center,
+                               pan_y + pan_h - 2);
+
+            int lv = f.volume_left < 0 ? -f.volume_left : f.volume_left;
+            int rv = f.volume_right < 0 ? -f.volume_right : f.volume_right;
+            float pan = 0.0f;
+            if (lv + rv > 0) pan = (float)(rv - lv) / (float)(lv + rv);
+            if (pan < -1.0f) pan = -1.0f;
+            if (pan > 1.0f) pan = 1.0f;
+            const int marker = center + (int)(pan * (pan_w / 2 - 3));
+            SDL_SetRenderDrawColor(renderer_, f.active ? pr : 70,
+                                   f.active ? pg : 75, f.active ? pb : 110, 255);
+            SDL_Rect mark = {marker - 1, pan_y + 1, 3, pan_h - 2};
+            SDL_RenderFillRect(renderer_, &mark);
+        }
+
         // Level meter: the fill is the level actually used in the mix
         // (volume x ADSR) and the peak marker holds the voice volume (VOL).
         {
