@@ -514,15 +514,17 @@ void Visualizer::update() {
             if (event.key.keysym.sym == SDLK_ESCAPE || event.key.keysym.sym == SDLK_q) {
                 running_ = false;
                 return;
-            } else if (event.key.keysym.sym == SDLK_UP && file_list_count_ > 0) {
-                // 前のファイルへ
+            } else if ((event.key.keysym.sym == SDLK_LEFT ||
+                        event.key.keysym.sym == SDLK_UP) && file_list_count_ > 0) {
+                // 前のファイルへ（リストの先頭からは末尾へ回り込む）
                 int new_index = current_file_index_ - 1;
                 if (new_index < 0) new_index = file_list_count_ - 1;
                 requested_file_index_ = new_index;
                 file_change_requested_ = true;
                 return;
-            } else if (event.key.keysym.sym == SDLK_DOWN && file_list_count_ > 0) {
-                // 次のファイルへ
+            } else if ((event.key.keysym.sym == SDLK_RIGHT ||
+                        event.key.keysym.sym == SDLK_DOWN) && file_list_count_ > 0) {
+                // 次のファイルへ（末尾からは先頭へ回り込む）
                 int new_index = (current_file_index_ + 1) % file_list_count_;
                 requested_file_index_ = new_index;
                 file_change_requested_ = true;
@@ -926,6 +928,16 @@ void Visualizer::setFileList(const char** files, int count, int current_index) {
     file_list_count_ = count;
     current_file_index_ = current_index;
     file_change_requested_ = false;
+}
+
+void Visualizer::setCurrentFileIndex(int index) {
+    if (file_list_count_ <= 0) {
+        current_file_index_ = 0;
+        return;
+    }
+    if (index < 0) index = 0;
+    if (index >= file_list_count_) index = file_list_count_ - 1;
+    current_file_index_ = index;
 }
 
 // テキスト描画ヘルパー

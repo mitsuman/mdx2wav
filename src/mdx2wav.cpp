@@ -1,5 +1,6 @@
 #include <ctype.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -177,6 +178,18 @@ bool read_file(const char *name, int *fsize, u8 **fdata, int offset) {
   *fdata = data;
   *fsize = size + offset + kTailPad;
   return true;
+}
+
+// パスの表記揺れ（"./name" と "name" など）を吸収する。
+std::string canonicalPath(const std::string& path) {
+  char resolved[PATH_MAX];
+  if (realpath(path.c_str(), resolved) != nullptr) return std::string(resolved);
+  return path;
+}
+
+std::string baseName(const std::string& path) {
+  const size_t slash = path.find_last_of('/');
+  return slash == std::string::npos ? path : path.substr(slash + 1);
 }
 
 // ディレクトリ内のMDX/SPCファイルを列挙
@@ -542,13 +555,24 @@ int main(int argc, char **argv) {
         fprintf(stderr, "No MDX/SPC files found in directory: %s\n", mdx_name);
         return -1;
       }
-    } else {
-      // 現在のファイルのインデックスを見つける
-      std::string current_file(mdx_name);
+    } else if (!file_list.empty()) {
+      // 現在のファイルのインデックスを見つける。  カレントディレクトリから
+      // 再生した場合は "./name" と "name" のように表記が揺れるため、実パス
+      // で比較する（見つからなければファイル名だけで比較する）。
+      const std::string current_file = canonicalPath(mdx_name);
       for (size_t i = 0; i < file_list.size(); i++) {
-        if (file_list[i] == current_file) {
-          current_file_index = i;
+        if (canonicalPath(file_list[i]) == current_file) {
+          current_file_index = (int)i;
           break;
+        }
+      }
+      if (current_file_index == 0 && canonicalPath(file_list[0]) != current_file) {
+        const std::string base = baseName(mdx_name);
+        for (size_t i = 0; i < file_list.size(); i++) {
+          if (baseName(file_list[i]) == base) {
+            current_file_index = (int)i;
+            break;
+          }
         }
       }
     }
@@ -768,13 +792,10 @@ reload_file:
     visualizer->setFilename(mdx_name);
     visualizer->resetElapsedTime();
 
-    // ファイルリストのインデックスを更新
+    // ファイルリストのインデックスを更新（ポインタは初回設定時のものを
+    // そのまま使う。ここで新しいベクタを作ると即座に破棄されてしまう）
     if (!file_list.empty()) {
-      std::vector<const char*> file_ptrs;
-      for (const auto& f : file_list) {
-        file_ptrs.push_back(f.c_str());
-      }
-      visualizer->setFileList(file_ptrs.data(), file_ptrs.size(), current_file_index);
+      visualizer->setCurrentFileIndex(current_file_index);
     }
 
     if (!is_spc) {

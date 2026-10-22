@@ -110,6 +110,8 @@ public:
     
     // ファイルリストの設定
     void setFileList(const char** files, int count, int current_index);
+    // 曲送り後などに、リスト内の現在位置だけを更新する
+    void setCurrentFileIndex(int index);
     
     // ファイル切り替え要求があるか確認
     bool hasFileChangeRequest() const { return file_change_requested_; }
