@@ -119,6 +119,45 @@ void Visualizer::renderSPCChannelInfo() {
     else if (c.left_right & 0x40) pan = " R";
     renderBitmapText(pan, 225, y + 53, active ? 150 : 70, active ? 200 : 90, 255);
 
+    // PCM playback position within the BRR sample/loop, like the ADPCM bar.
+    if (c.spc_source != 0 && c.spc_end > c.spc_source) {
+      const int bar_x = 88;
+      const int bar_y = y + 61;
+      const int bar_w = 140;
+      const int bar_h = 4;
+      const int start = c.spc_source;
+      const int end = c.spc_end;
+      const int span = end - start;
+      int pos = c.spc_brr;
+      if (pos < start) pos = start;
+      if (pos > end) pos = end;
+      const int played = (pos - start) * (bar_w - 2) / span;
+
+      SDL_Rect bg = {bar_x, bar_y, bar_w, bar_h};
+      SDL_SetRenderDrawColor(renderer_, 30, 30, 50, 255);
+      SDL_RenderFillRect(renderer_, &bg);
+      SDL_SetRenderDrawColor(renderer_, 60, 70, 110, 255);
+      SDL_RenderDrawRect(renderer_, &bg);
+
+      if (played > 0) {
+        SDL_SetRenderDrawColor(renderer_, r, g, b, active ? 230 : 90);
+        SDL_Rect fill = {bar_x + 1, bar_y + 1, played, bar_h - 2};
+        SDL_RenderFillRect(renderer_, &fill);
+      }
+
+      // Loop point tick.
+      if (c.spc_loop >= start && c.spc_loop <= end) {
+        const int loop_x = bar_x + 1 + (c.spc_loop - start) * (bar_w - 2) / span;
+        SDL_SetRenderDrawColor(renderer_, 255, 220, 120, 220);
+        SDL_RenderDrawLine(renderer_, loop_x, bar_y, loop_x, bar_y + bar_h - 1);
+      }
+
+      // Current position marker.
+      SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 255);
+      SDL_RenderDrawLine(renderer_, bar_x + 1 + played, bar_y,
+                         bar_x + 1 + played, bar_y + bar_h - 1);
+    }
+
     // Actual generated output for this voice, captured from the S-DSP.
     int16_t waveform[YM2151State::CHANNEL_WAVEFORM_SIZE];
     state_->getChannelWaveform(ch, waveform, YM2151State::CHANNEL_WAVEFORM_SIZE);

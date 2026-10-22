@@ -40,6 +40,18 @@ int PitchToNote(int pitch) {
 // Estimate the note of the actual per-voice output.  The captured samples are
 // already at the final playback rate, so the autocorrelation period maps
 // directly to frequency.  Returns 0 for noise/unpitched voices.
+// Walk the BRR block chain to find the end of the sample/loop.  Only the
+// header is needed, so this is much cheaper than decoding the samples.
+int FindBRREnd(const uint8_t* ram, int start) {
+  int addr = start & 0xFFFF;
+  for (int block = 0; block < 2048; block++) {
+    const int header = ram[addr];
+    addr = (addr + 9) & 0xFFFF;
+    if (header & 0x01) return addr;  // end flag (bit 0)
+  }
+  return addr;
+}
+
 int OutputWaveformToNote(const int16_t* wave, int samples) {
   if (!wave || samples < 16) return 0;
 
@@ -322,6 +334,11 @@ void SPCPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
     s.source_address = ram[entry] | (ram[(entry + 1) & 0xFFFF] << 8);
     s.loop_address = ram[(entry + 2) & 0xFFFF] | (ram[(entry + 3) & 0xFFFF] << 8);
     s.brr_address = voices[i].brr_addr;
+    if (s.source_address || s.loop_address || s.brr_address) {
+      const int start = s.source_address ? s.source_address
+                       : (s.loop_address ? s.loop_address : s.brr_address);
+      s.sample_end_address = FindBRREnd(ram, start);
+    }
 
     if (s.key_on) {
       // Copy the DSP's actual per-voice output ring.  This already contains
@@ -340,6 +357,7 @@ void SPCPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
       s.source_address = 0;
       s.loop_address = 0;
       s.brr_address = 0;
+      s.sample_end_address = 0;
       s.waveform_samples = 0;
       s.note = 0;
     }

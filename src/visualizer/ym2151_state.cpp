@@ -392,7 +392,7 @@ void YM2151State::setSPCMode(bool enabled) {
 void YM2151State::updateSPCVoice(int ch, bool key_on, bool kon, int note, int volume,
                                  int left_volume, int right_volume, int pitch,
                                  int envelope, int envelope_phase, int source_address,
-                                 int loop_address, int brr_address,
+                                 int loop_address, int brr_address, int sample_end_address,
                                  const int16_t* waveform, int waveform_samples) {
     if (ch < 0 || ch >= 8) return;
 
@@ -410,6 +410,7 @@ void YM2151State::updateSPCVoice(int ch, bool key_on, bool kon, int note, int vo
     c.spc_source = (uint16_t)source_address;
     c.spc_loop = (uint16_t)loop_address;
     c.spc_brr = (uint16_t)brr_address;
+    c.spc_end = (uint16_t)sample_end_address;
     c.spc_env_phase = (uint8_t)envelope_phase;
     c.spc_kon = kon ? 1 : 0;
 

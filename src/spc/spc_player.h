@@ -40,6 +40,7 @@ class SPCPlayer {
     int source_address;  // DIR entry start address
     int loop_address;    // DIR entry loop address
     int brr_address;     // current BRR block address
+    int sample_end_address; // end of the BRR stream/loop
     int waveform_samples;
     int16_t waveform[kWaveformSamples];
   };

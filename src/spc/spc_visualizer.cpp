@@ -14,7 +14,8 @@ void UpdateSPCVisualizerState(SPCPlayer& player, YM2151State* state) {
     state->updateSPCVoice(
         ch, v.key_on, v.kon, v.note, v.volume, v.left_volume, v.right_volume,
         v.pitch, v.envelope, v.envelope_phase, v.source_address,
-        v.loop_address, v.brr_address, v.waveform, v.waveform_samples);
+        v.loop_address, v.brr_address, v.sample_end_address,
+        v.waveform, v.waveform_samples);
   }
 
   SPCPlayer::GlobalState global;

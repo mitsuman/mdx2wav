@@ -2006,6 +2006,14 @@ void Visualizer::renderKeyboard() {
     // 表示チャンネル数分だけ表示
     for (int ch = 0; ch < ym2151_display_channels_; ch++) {
         auto& channel = channels[ch];
+
+        // SPC notes can exceed the C0-C8 range drawn by default.  Shift this
+        // voice's keyboard window up by whole octaves so the note stays on
+        // screen; rows may use different windows.
+        int octave_offset = 0;
+        if (spc_mode_ && channel.note > 96) {
+            octave_offset = (channel.note - 96 + 11) / 12;
+        }
         
         // EGフェーズに基づく色を決定（全オペレータの中で最も進んでいるフェーズを使用）
         int dominant_phase = 0;  // デフォルトはoff
@@ -2081,8 +2089,8 @@ void Visualizer::renderKeyboard() {
         const int white_notes[] = {0, 2, 4, 5, 7, 9, 11};  // C, D, E, F, G, A, B
         int white_key_index = 0;
         
-        for (int octave = 0; octave <= 8; octave++) {
-            int notes_to_draw = (octave == 8) ? 1 : 7;  // C8のみ描画
+        for (int octave = octave_offset; octave <= 8 + octave_offset; octave++) {
+            int notes_to_draw = (octave == 8 + octave_offset) ? 1 : 7;
             
             for (int i = 0; i < notes_to_draw; i++) {
                 int note = white_notes[i];
@@ -2120,7 +2128,7 @@ void Visualizer::renderKeyboard() {
         const int black_positions[] = {0, 1, 3, 4, 5};  // 白鍵のどの位置に配置するか
         white_key_index = 0;
         
-        for (int octave = 0; octave <= 7; octave++) {
+        for (int octave = octave_offset; octave <= 7 + octave_offset; octave++) {
             for (int i = 0; i < 5; i++) {
                 int note = black_notes[i];
                 int midi_note = octave * 12 + note;
