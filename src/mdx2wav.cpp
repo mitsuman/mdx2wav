@@ -907,6 +907,7 @@ int main(int argc, char **argv) {
     // ビジュアライザー初期化
     visualizer = new Visualizer();
     visualizer->setSpectrumEnabled(want_spectrum);
+    visualizer->setSampleRate(SAMPLE_RATE);
     bool init_success = false;
 
     if (video_filename) {

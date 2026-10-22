@@ -109,6 +109,7 @@ Visualizer::Visualizer()
     , file_list_count_(0)
     , current_file_index_(0)
     , psf_mode_(false)
+    , sample_rate_(44100)
     , psf_voice_count_(0)
     , psf_master_left_(0)
     , psf_master_right_(0)
@@ -1212,8 +1213,8 @@ void Visualizer::renderPSF() {
 
     char text[160];
     snprintf(text, sizeof(text),
-             "PLAYSTATION / SPU 16 VOICES   MVOLL %02X  MVOLR %02X  REVERB %s",
-             psf_master_left_ & 0xFF, psf_master_right_ & 0xFF,
+             "PLAYSTATION / SPU %dHz  16 VOICES   MVOLL %02X  MVOLR %02X  REVERB %s",
+             sample_rate_, psf_master_left_ & 0xFF, psf_master_right_ & 0xFF,
              psf_reverb_ ? "ON" : "OFF");
     renderBitmapText(text, label_x, start_y - 16, 120, 160, 220);
 

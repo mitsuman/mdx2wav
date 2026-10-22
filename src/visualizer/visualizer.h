@@ -165,6 +165,7 @@ public:
         int waveform_samples;
     };
     void setPSFMode(bool enabled);
+    void setSampleRate(int rate) { sample_rate_ = rate; }
     bool isPSFMode() const { return psf_mode_; }
     void updatePSFState(const PSFVoice* voices, int count,
                         int master_volume_left, int master_volume_right,
@@ -287,6 +288,7 @@ private:
     
     // ファイルリスト管理
     bool psf_mode_;
+    int sample_rate_;
     PSFVoice psf_voices_[24];
     int psf_voice_count_;
     int psf_latched_note_[24];
