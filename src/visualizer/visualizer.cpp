@@ -2774,10 +2774,11 @@ void Visualizer::renderKeyboard() {
                 SDL_SetRenderDrawColor(renderer_, 60, 60, 120, 255);
                 SDL_RenderDrawRect(renderer_, &key_rect);
 
-                // Green pitch dot above the matching key.  In SPC mode it also
-                // follows the fractional part of the register-derived pitch, so
-                // vibrato and slides move it smoothly instead of flipping keys.
-                if (channel.key_on && channel.note > 0 && channel.note == midi_note) {
+                // Green pitch dot above the matching key, SPC only: MDX already
+                // shows each operator's pitch, and SPC uses the dot for vibrato
+                // (it follows the fractional part of the register pitch).
+                if (spc_mode_ && channel.key_on && channel.note > 0 &&
+                    channel.note == midi_note) {
                     SDL_SetRenderDrawColor(renderer_, 100, 255, 100, 255);
                     int dot_dx = 0;
                     if (spc_mode_) {
@@ -2826,10 +2827,11 @@ void Visualizer::renderKeyboard() {
                 SDL_SetRenderDrawColor(renderer_, 60, 60, 120, 255);
                 SDL_RenderDrawRect(renderer_, &key_rect);
 
-                if (channel.key_on && channel.note > 0 && channel.note == midi_note) {
+                if (spc_mode_ && channel.key_on && channel.note > 0 &&
+                    channel.note == midi_note) {
                     SDL_SetRenderDrawColor(renderer_, 100, 255, 100, 255);
                     int dot_dx = 0;
-                    if (spc_mode_) {
+                    {
                         dot_dx = (int)((channel.spc_pitch_note - (float)midi_note) *
                                        black_key_width);
                         if (dot_dx < -3) dot_dx = -3;
