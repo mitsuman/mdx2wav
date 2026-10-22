@@ -591,7 +591,7 @@ void Visualizer::update() {
                         filer_mode_ = false;
                         return;
                     }
-                } else if (sym == SDLK_LEFT) {
+                } else if (sym == SDLK_LEFT || sym == SDLK_BACKSPACE) {
                     // Go up one directory.
                     std::string dir = filer_directory_;
                     while (dir.size() > 1 && dir.back() == '/') dir.pop_back();
@@ -2069,7 +2069,7 @@ void Visualizer::renderFiler() {
     renderText(renderer_, font_title, header, panel_x + 20, panel_y + 10,
                200, 220, 255);
     renderText(renderer_, font_small_,
-               "UP/DOWN: select   ENTER: open/play   LEFT: parent   F/ESC: close",
+               "UP/DOWN: select   ENTER: open/play   LEFT/BACKSPACE: parent   F/ESC: close",
                panel_x + panel_w - 500, panel_y + 14, 130, 150, 200);
 
     const int row_h = 22;
