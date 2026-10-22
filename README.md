@@ -86,10 +86,12 @@ PlayStation BIOS image, which cannot be bundled: pass one with
 `~/.config/mdx2wav/psx-bios.bin`.  Song length and fade come from the
 `length` / `fade` tags, and `-t` prints the title.
 
-The PSF panel shows the 24 SPU voices in two columns (12 + 12).  Each row has
-the voice's pitch, L/R volume, envelope and note packed on the left, followed
-by its own eight-octave keyboard (C0..C7): the SPC keyboard's density in a
-shorter, compressed row, with the playing key highlighted.
+The PSF panel shows the 24 SPU voices in two columns (12 + 12).  Each row
+starts with a 7-segment voice number like the MDX/SPC panels, then PIT with VOL
+underneath, the note and the envelope bar.  The rest of the row is the voice's
+own eight-octave keyboard (C0..C7), as dense as the SPC keyboard but shorter,
+and the playing key is coloured by the SPU envelope state (green attack,
+orange decay, blue sustain, purple release), the same palette as SPC.
 Notes are derived from the pitch register and the decoded VAG sample's own
 tuning, so they are absolute rather than guessed from the mix.  Only PSF1 is supported (PSF2 would need a
 PS2 emulator), and the web build does not include the PSF core yet.

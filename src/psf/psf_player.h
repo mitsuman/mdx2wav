@@ -30,6 +30,7 @@ class PSFPlayer {
     int envelope;         // current envelope level (0-0x7FFF)
     int adsr1;
     int adsr2;
+    int phase;            // 0 off, 1 attack, 2 decay, 3 sustain, 4 release
     int start_address;    // SPU RAM address / 8
     int loop_address;
     int current_address;

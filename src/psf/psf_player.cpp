@@ -524,6 +524,7 @@ void PSFPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
     s.envelope = (int)spu_getreg_voice(spu, v, SPUREG_VOICE_ENVX);
     s.adsr1 = (int)spu_getreg_voice(spu, v, SPUREG_VOICE_ADSR1);
     s.adsr2 = (int)spu_getreg_voice(spu, v, SPUREG_VOICE_ADSR2);
+    s.phase = (int)spu_getreg_voice(spu, v, SPUREG_VOICE_ENVSTATE);
     s.start_address = (int)spu_getreg_voice(spu, v, SPUREG_VOICE_SSA);
     s.loop_address = (int)spu_getreg_voice(spu, v, SPUREG_VOICE_LSAX);
     s.current_address = (int)spu_getreg_voice(spu, v, SPUREG_VOICE_NAX);

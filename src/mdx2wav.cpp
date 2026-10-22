@@ -1083,6 +1083,7 @@ reload_file:
             out[vi].envelope = pv[vi].envelope;
             out[vi].adsr1 = pv[vi].adsr1;
             out[vi].adsr2 = pv[vi].adsr2;
+            out[vi].phase = pv[vi].phase;
             out[vi].start_address = pv[vi].start_address;
             out[vi].loop_address = pv[vi].loop_address;
             out[vi].current_address = pv[vi].current_address;

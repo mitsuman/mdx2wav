@@ -2070,6 +2070,7 @@ uint32 EMU_CALL spucore_getreg_voice(void *state, uint32 voice, uint32 n) {
   case SPUREG_VOICE_SSA  : return SPUCORESTATE->chan[voice].sample.start_block_addr;
   case SPUREG_VOICE_LSAX : return SPUCORESTATE->chan[voice].sample.loop_block_addr;
   case SPUREG_VOICE_NAX  : return SPUCORESTATE->chan[voice].sample.block_addr;
+  case SPUREG_VOICE_ENVSTATE: return SPUCORESTATE->chan[voice].env.state;
   }
   return 0;
 }
