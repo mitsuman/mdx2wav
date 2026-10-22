@@ -124,6 +124,7 @@ public:
     // PSF (PlayStation SPU) 表示
     struct PSFVoice {
         bool active;
+        bool note_on;
         int pitch;
         int note;
         int volume_left;
@@ -260,6 +261,7 @@ private:
     bool psf_mode_;
     PSFVoice psf_voices_[24];
     int psf_voice_count_;
+    int psf_latched_note_[24];
     int psf_master_left_;
     int psf_master_right_;
     bool psf_reverb_;

@@ -317,6 +317,7 @@ struct SPUCORE_CHAN {
   struct SPUCORE_SAMPLE   sample;
   struct SPUCORE_ENVELOPE env;
   int samples_until_pending_keyon;
+  uint32 key_ons;  // monotonic key-on counter, used by the visualizer
 };
 
 /*
@@ -997,6 +998,7 @@ static void EMU_CALL voices_on(struct SPUCORE_STATE *state, uint32 bits) {
 //    sint32 extvol_r = ((sint16)(state->avol[1]));
 
       voice_on(state->chan + a);
+      state->chan[a].key_ons++;
     }
     bits >>= 1;
   }
@@ -2071,6 +2073,7 @@ uint32 EMU_CALL spucore_getreg_voice(void *state, uint32 voice, uint32 n) {
   case SPUREG_VOICE_LSAX : return SPUCORESTATE->chan[voice].sample.loop_block_addr;
   case SPUREG_VOICE_NAX  : return SPUCORESTATE->chan[voice].sample.block_addr;
   case SPUREG_VOICE_ENVSTATE: return SPUCORESTATE->chan[voice].env.state;
+  case SPUREG_VOICE_KEYONS: return SPUCORESTATE->chan[voice].key_ons;
   }
   return 0;
 }

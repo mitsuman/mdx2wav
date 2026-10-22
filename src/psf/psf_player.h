@@ -23,6 +23,7 @@ class PSFPlayer {
 
   struct VoiceState {
     bool active;          // envelope is not fully released
+    bool note_on;         // a KON was processed since the last snapshot
     int pitch;            // 0x0000-0x3FFF (0x1000 = 44.1 kHz)
     int note;             // MIDI note derived from the pitch and the sample
     int volume_left;      // 0x0000-0x3FFF
@@ -106,6 +107,7 @@ class PSFPlayer {
   SPCResampler resampler_;
   std::vector<int16_t> raw_;
   mutable std::map<int, float> sample_tunes_;  // sample start address -> note
+  mutable uint32_t key_on_seen_[kVoices];      // last KON counter seen
 };
 
 #endif  // PSF_PLAYER_H

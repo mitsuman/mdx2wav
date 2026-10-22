@@ -241,7 +241,9 @@ PSFPlayer::PSFPlayer()
       fadeout_seconds_(0.0),
       elapsed_(0.0),
       tag_seconds_(0.0),
-      tag_fade_(0.0) {}
+      tag_fade_(0.0) {
+  for (int i = 0; i < kVoices; i++) key_on_seen_[i] = 0;
+}
 
 PSFPlayer::~PSFPlayer() {
   if (state_) free(state_);
@@ -365,6 +367,7 @@ bool PSFPlayer::Load(const char* path, const char* bios_path, std::string* error
   duration_ = 0.0;
   exes_.clear();
   sample_tunes_.clear();
+  for (int i = 0; i < kVoices; i++) key_on_seen_[i] = 0;
   title_.clear();
   game_.clear();
   artist_.clear();
@@ -525,6 +528,9 @@ void PSFPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
     s.adsr1 = (int)spu_getreg_voice(spu, v, SPUREG_VOICE_ADSR1);
     s.adsr2 = (int)spu_getreg_voice(spu, v, SPUREG_VOICE_ADSR2);
     s.phase = (int)spu_getreg_voice(spu, v, SPUREG_VOICE_ENVSTATE);
+    const uint32_t ons = (uint32_t)spu_getreg_voice(spu, v, SPUREG_VOICE_KEYONS);
+    s.note_on = ons != key_on_seen_[v];
+    if (s.note_on) key_on_seen_[v] = ons;
     s.start_address = (int)spu_getreg_voice(spu, v, SPUREG_VOICE_SSA);
     s.loop_address = (int)spu_getreg_voice(spu, v, SPUREG_VOICE_LSAX);
     s.current_address = (int)spu_getreg_voice(spu, v, SPUREG_VOICE_NAX);

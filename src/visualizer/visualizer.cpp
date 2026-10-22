@@ -141,6 +141,7 @@ Visualizer::Visualizer()
         keyboard_octave_offset_[i] = 0;
         keyboard_offset_hold_until_s_[i] = 0.0;
         keyboard_latched_note_[i] = 0;
+        psf_latched_note_[i] = 0;
     }
 
     // 前フレーム波形データの初期化
@@ -1025,6 +1026,7 @@ void Visualizer::setPSFMode(bool enabled) {
     psf_mode_ = enabled;
     if (enabled) {
         psf_voice_count_ = 24;
+        for (int i = 0; i < 24; i++) psf_latched_note_[i] = 0;
     }
 }
 
@@ -1081,6 +1083,15 @@ void Visualizer::renderPSF() {
         int pr = 60, pg = 60, pb = 80;
         getEGPhaseColor(f.active ? f.phase : 0, pr, pg, pb);
 
+        // The key position is fixed at note-on; later pitch changes only move
+        // the green dot, exactly like the SPC keyboard.
+        if (f.note_on) {
+            psf_latched_note_[v] = f.note > 0 ? f.note : 0;
+        } else if (psf_latched_note_[v] == 0 && f.active && f.note > 0) {
+            psf_latched_note_[v] = f.note;
+        }
+        const int latched = psf_latched_note_[v];
+
         // Voice number, 7-segment style.
         draw7Segment(x + label_x, y + 10, v / 10, pr, pg, pb, 8, 7);
         draw7Segment(x + label_x + 11, y + 10, v % 10, pr, pg, pb, 8, 7);
@@ -1127,7 +1138,7 @@ void Visualizer::renderPSF() {
             for (int i = 0; i < 7; i++) {
                 const int note = low_note + o * 12 + kWhiteSemis[i];
                 const int kx = keyboard_x + white_index * white_w;
-                const bool pressed = f.active && f.note == note;
+                const bool pressed = f.active && latched == note;
                 SDL_Rect key = {kx, keyboard_y, white_w - 1, white_h};
                 if (pressed) {
                     SDL_SetRenderDrawColor(renderer_, pr, pg, pb, 255);
@@ -1145,7 +1156,7 @@ void Visualizer::renderPSF() {
                 const int note = low_note + o * 12 + kBlackSemis[i];
                 const int kx = keyboard_x + (o * 7 + kBlackOffsets[i]) * white_w +
                                white_w - black_w / 2;
-                const bool pressed = f.active && f.note == note;
+                const bool pressed = f.active && latched == note;
                 SDL_Rect key = {kx, keyboard_y, black_w, black_h};
                 if (pressed) {
                     SDL_SetRenderDrawColor(renderer_, pr, pg, pb, 255);
@@ -1158,7 +1169,8 @@ void Visualizer::renderPSF() {
             }
         }
 
-        // Marker above the key that is playing.
+        // Green dot above the key of the current pitch (the key itself stays
+        // at the note-on position).
         if (f.active && f.note >= low_note && f.note < low_note + octaves * 12) {
             const int semis = f.note - low_note;
             const int o = semis / 12;
@@ -1180,7 +1192,7 @@ void Visualizer::renderPSF() {
                 }
             }
             if (kx >= 0) {
-                SDL_SetRenderDrawColor(renderer_, pr, pg, pb, 255);
+                SDL_SetRenderDrawColor(renderer_, 100, 255, 100, 255);
                 SDL_Rect mark = {kx - 2, keyboard_y - 6, 5, 5};
                 SDL_RenderFillRect(renderer_, &mark);
             }

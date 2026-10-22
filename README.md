@@ -91,7 +91,9 @@ starts with a 7-segment voice number like the MDX/SPC panels, then PIT with VOL
 underneath, the note and the envelope bar.  The rest of the row is the voice's
 own eight-octave keyboard (C0..C7), as dense as the SPC keyboard but shorter,
 and the playing key is coloured by the SPU envelope state (green attack,
-orange decay, blue sustain, purple release), the same palette as SPC.
+orange decay, blue sustain, purple release), the same palette as SPC.  As in
+the SPC panel the key is latched at note-on and later pitch changes move a
+green dot above the keyboard instead of the key.
 Notes are derived from the pitch register and the decoded VAG sample's own
 tuning, so they are absolute rather than guessed from the mix.  Only PSF1 is supported (PSF2 would need a
 PS2 emulator), and the web build does not include the PSF core yet.

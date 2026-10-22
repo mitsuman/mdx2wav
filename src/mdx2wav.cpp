@@ -1076,6 +1076,7 @@ reload_file:
           Visualizer::PSFVoice out[PSFPlayer::kVoices];
           for (int vi = 0; vi < PSFPlayer::kVoices; vi++) {
             out[vi].active = pv[vi].active;
+            out[vi].note_on = pv[vi].note_on;
             out[vi].pitch = pv[vi].pitch;
             out[vi].note = pv[vi].note;
             out[vi].volume_left = pv[vi].volume_left;
