@@ -60,12 +60,15 @@ int OutputWaveformToNote(const int16_t* wave, int samples) {
   mean /= samples;
 
   const int max_lag = samples / 2;
-  if (max_lag < 3) return 0;
+  if (max_lag < 8) return 0;
   double norms[513] = {0.0};
   if (max_lag > 512) return 0;
 
+  // Start at lag 8: near-DC and very high harmonics otherwise dominate the
+  // autocorrelation of bass notes.  This still covers notes down to ~250 Hz
+  // comfortably, and the longer 1024-sample window reaches the low bass.
   double best = 0.0;
-  for (int lag = 2; lag <= max_lag; lag++) {
+  for (int lag = 8; lag <= max_lag; lag++) {
     double corr = 0.0, ea = 0.0, eb = 0.0;
     for (int i = 0; i + lag < samples; i++) {
       const double a = wave[i] - mean;
@@ -81,9 +84,9 @@ int OutputWaveformToNote(const int16_t* wave, int samples) {
   }
 
   if (best < 0.5) return 0;
-  const double threshold = best * 0.9;
+  const double threshold = best * 0.85;
   int best_lag = 0;
-  for (int lag = 3; lag < max_lag; lag++) {
+  for (int lag = 9; lag < max_lag; lag++) {
     if (norms[lag] >= threshold && norms[lag] >= norms[lag - 1] &&
         norms[lag] >= norms[lag + 1]) {
       best_lag = lag;
@@ -352,7 +355,7 @@ void SPCPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
         s.waveform[j] = ring[(pos - count + j + ring_size) & (ring_size - 1)];
       }
       s.waveform_samples = count;
-      s.note = OutputWaveformToNote(s.waveform, std::min(count, 512));
+      s.note = OutputWaveformToNote(s.waveform, count);
     } else {
       s.source_address = 0;
       s.loop_address = 0;

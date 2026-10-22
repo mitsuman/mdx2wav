@@ -23,7 +23,7 @@ struct SPC_Filter;
 class SPCPlayer {
  public:
   static const int kVoices = 8;
-  static const int kWaveformSamples = 800;
+  static const int kWaveformSamples = 1024;
 
   struct VoiceState {
     bool key_on;
