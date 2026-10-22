@@ -155,6 +155,8 @@ Visualizer::Visualizer()
         psf_latched_note_[i] = 0;
         psf_peak_[i] = 0.0f;
         psf_peak_time_[i] = 0.0;
+        psf_phase_hold_[i] = 0;
+        psf_phase_until_[i] = 0.0;
     }
 
     // 前フレーム波形データの初期化
@@ -1043,6 +1045,8 @@ void Visualizer::setPSFMode(bool enabled) {
             psf_latched_note_[i] = 0;
             psf_peak_[i] = 0.0f;
             psf_peak_time_[i] = 0.0;
+            psf_phase_hold_[i] = 0;
+            psf_phase_until_[i] = 0.0;
         }
     }
 }
@@ -1099,8 +1103,21 @@ void Visualizer::renderPSF() {
         const int x = col * col_w;
         const int y = start_y + row * row_h;
 
+        // Attack and release can be shorter than one frame on the SPU, so
+        // hold those colours briefly; without it the key would only ever show
+        // the sustain colour.
+        const double now_phase = SDL_GetTicks() / 1000.0;
+        int phase = f.active ? f.phase : 0;
+        if (phase == 1 || phase == 4) {
+            psf_phase_hold_[v] = phase;
+            psf_phase_until_[v] = now_phase + 0.25;
+        } else if (now_phase < psf_phase_until_[v] &&
+                   (phase == 0 || phase == 3)) {
+            phase = psf_phase_hold_[v];
+        }
+
         int pr = 60, pg = 60, pb = 80;
-        getEGPhaseColor(f.active ? f.phase : 0, pr, pg, pb);
+        getEGPhaseColor(phase, pr, pg, pb);
 
         // The key position is fixed at note-on; later pitch changes only move
         // the green dot, exactly like the SPC keyboard.

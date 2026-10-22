@@ -266,6 +266,8 @@ private:
     int psf_latched_note_[24];
     float psf_peak_[24];
     double psf_peak_time_[24];
+    int psf_phase_hold_[24];
+    double psf_phase_until_[24];
     int psf_master_left_;
     int psf_master_right_;
     bool psf_reverb_;
