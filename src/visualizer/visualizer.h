@@ -66,7 +66,13 @@ public:
     // SPC (SNES S-DSP) layout.  The visualizer keeps its keyboard, waveform and
     // spectrum displays, but the per-channel panel shows S-DSP voices instead
     // of YM2151 operators.
-    void setSPCMode(bool enabled) { spc_mode_ = enabled; }
+    void setSPCMode(bool enabled) {
+        spc_mode_ = enabled;
+        for (int i = 0; i < 8; i++) {
+            keyboard_octave_offset_[i] = 0;
+            keyboard_offset_hold_until_s_[i] = 0.0;
+        }
+    }
     bool isSPCMode() const { return spc_mode_; }
     
     // OPMチップポインタを設定（Timer制御用）
@@ -113,7 +119,13 @@ public:
     void clearRestartRequest() { restart_requested_ = false; }
     
     // 再生時間をリセット
-    void resetElapsedTime() { elapsed_time_ = 0.0; }
+    void resetElapsedTime() {
+        elapsed_time_ = 0.0;
+        for (int i = 0; i < 8; i++) {
+            keyboard_octave_offset_[i] = 0;
+            keyboard_offset_hold_until_s_[i] = 0.0;
+        }
+    }
     
     // MXDRVG一時停止状態を取得
     bool isMXDRVGPaused() const { return mxdrvg_paused_; }
@@ -231,6 +243,11 @@ private:
     
     // キーボード演奏用の選択チャンネル
     int selected_channel_;
+
+    // Per-voice keyboard octave shift, with a hold time so high notes do not
+    // make the keyboard jump back and forth.
+    int keyboard_octave_offset_[8];
+    double keyboard_offset_hold_until_s_[8];
     
     // キーボード演奏用のオクターブオフセット
     int octave_offset_;

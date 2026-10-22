@@ -100,6 +100,11 @@ Visualizer::Visualizer()
         channel_keys_[i].key_on_time = 0;
     }
     
+    for (int i = 0; i < 8; i++) {
+        keyboard_octave_offset_[i] = 0;
+        keyboard_offset_hold_until_s_[i] = 0.0;
+    }
+
     // 前フレーム波形データの初期化
     for (int i = 0; i < MAX_CHANNELS; i++) {
         memset(prev_waveform_[i], 0, sizeof(prev_waveform_[i]));
@@ -2009,11 +2014,25 @@ void Visualizer::renderKeyboard() {
 
         // SPC notes can exceed the C0-C8 range drawn by default.  Shift this
         // voice's keyboard window up by whole octaves so the note stays on
-        // screen; rows may use different windows.
-        int octave_offset = 0;
-        if (spc_mode_ && channel.note > 96) {
-            octave_offset = (channel.note - 96 + 11) / 12;
+        // screen.  Keep the shift for a couple of seconds after the high note
+        // ends so the keyboard does not jump around on every short note.
+        int desired_offset = 0;
+        if (spc_mode_ && channel.key_on && channel.note > 96) {
+            desired_offset = (channel.note - 96 + 11) / 12;
         }
+        const double hold_seconds = 2.0;
+        const double now_s = video_mode_ ? elapsed_time_ : SDL_GetTicks() / 1000.0;
+        int& held_offset = keyboard_octave_offset_[ch];
+        if (desired_offset > held_offset) {
+            held_offset = desired_offset;
+            keyboard_offset_hold_until_s_[ch] = now_s + hold_seconds;
+        } else if (desired_offset == held_offset && held_offset > 0) {
+            keyboard_offset_hold_until_s_[ch] = now_s + hold_seconds;
+        } else if (desired_offset < held_offset &&
+                   now_s >= keyboard_offset_hold_until_s_[ch]) {
+            held_offset = desired_offset;
+        }
+        const int octave_offset = held_offset;
         
         // EGフェーズに基づく色を決定（全オペレータの中で最も進んでいるフェーズを使用）
         int dominant_phase = 0;  // デフォルトはoff
