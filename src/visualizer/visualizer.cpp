@@ -1066,7 +1066,7 @@ void Visualizer::renderPSF() {
 
     char text[128];
     snprintf(text, sizeof(text),
-             "PLAYSTATION / SPU 24 VOICES   MVOLL %02X  MVOLR %02X  REVERB %s",
+             "PLAYSTATION / SPU 16 VOICES   MVOLL %02X  MVOLR %02X  REVERB %s",
              psf_master_left_ & 0xFF, psf_master_right_ & 0xFF,
              psf_reverb_ ? "ON" : "OFF");
     renderBitmapText(text, label_x, start_y - 20, 120, 160, 220);
@@ -1084,10 +1084,12 @@ void Visualizer::renderPSF() {
     static const int kBlackSemis[5] = {1, 3, 6, 8, 10};
     static const int kBlackOffsets[5] = {0, 1, 3, 4, 5};
 
-    for (int v = 0; v < 24; v++) {
+    // FF7 (and most PSF sets) use 16 voices; the other eight are only listed
+    // as notes at the bottom in case a driver does use them.
+    for (int v = 0; v < 16; v++) {
         const PSFVoice& f = psf_voices_[v];
-        const int col = v / 12;
-        const int row = v % 12;
+        const int col = v / 8;
+        const int row = v % 8;
         const int x = col * col_w;
         const int y = start_y + row * row_h;
 
@@ -1245,6 +1247,28 @@ void Visualizer::renderPSF() {
                 SDL_Rect mark = {kx - 2, keyboard_y - 6, 5, 5};
                 SDL_RenderFillRect(renderer_, &mark);
             }
+        }
+    }
+
+    // Voices 16..23 are not laid out, but note them when they play.
+    {
+        const int info_y = start_y + 8 * row_h + 12;
+        renderBitmapText("SPU 16-23:", label_x, info_y, 100, 120, 170);
+        int info_x = label_x + 80;
+        int shown = 0;
+        for (int v = 16; v < 24 && v < psf_voice_count_; v++) {
+            const PSFVoice& f = psf_voices_[v];
+            if (!f.active || f.note <= 0) continue;
+            int r, g, b;
+            getEGPhaseColor(f.phase, r, g, b);
+            snprintf(text, sizeof(text), "V%02d %s%d", v, getNoteName(f.note),
+                     f.note / 12 - 1);
+            renderBitmapText(text, info_x, info_y, r, g, b);
+            info_x += 78;
+            if (++shown >= 12) break;
+        }
+        if (shown == 0) {
+            renderBitmapText("--", info_x, info_y, 60, 70, 100);
         }
     }
 }

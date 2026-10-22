@@ -86,9 +86,11 @@ PlayStation BIOS image, which cannot be bundled: pass one with
 `~/.config/mdx2wav/psx-bios.bin`.  Song length and fade come from the
 `length` / `fade` tags, and `-t` prints the title.
 
-The PSF panel shows the 24 SPU voices in two columns (12 + 12).  Each row
-starts with a 7-segment voice number like the MDX/SPC panels, then PIT with VOL
-underneath, the note and the envelope bar.  The rest of the row is the voice's
+The PSF panel lays out the 16 voices that PSF sets normally use, eight per
+column.  Each row starts with a 7-segment voice number like the MDX/SPC
+panels, then PIT with VOL underneath, the note and the level meter.  Voices
+16..23 are only shown as note names along the bottom, in case a driver uses
+them.  The rest of the row is the voice's
 own eight-octave keyboard (C0..C7), as dense as the SPC keyboard but shorter,
 and the playing key is coloured by the SPU envelope state (green attack,
 orange decay, blue sustain, purple release), the same palette as SPC.  Each

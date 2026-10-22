@@ -718,7 +718,7 @@ int main(int argc, char **argv) {
       adpcm_channels = 0;
     }
     int window_height = is_psf
-        ? 700
+        ? 540
         : (is_spc ? 720
                   : 75 + (ym2151_channels * 70) + (adpcm_channels * 45) + 20);
 
