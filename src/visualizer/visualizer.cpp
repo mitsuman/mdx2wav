@@ -1105,11 +1105,17 @@ void Visualizer::renderPSF() {
         }
         const int latched = psf_latched_note_[v];
 
-        // Voice number, 7-segment style.
-        draw7Segment(x + label_x, y + 10, v / 10, pr, pg, pb, 8, 7);
-        draw7Segment(x + label_x + 11, y + 10, v % 10, pr, pg, pb, 8, 7);
-        renderBitmapText("SPU", x + label_x - 1, y + 31, pr, pg, pb);
-        renderBitmapText("PS1", x + label_x - 1, y + 39, pr / 2, pg / 2, pb / 2);
+        // Voice number, 7-segment style, in the same orange as the SPC panel.
+        const int seg_r = f.active ? CHANNEL_LABEL_COLOR_ACTIVE_R
+                                   : CHANNEL_LABEL_COLOR_INACTIVE_R;
+        const int seg_g = f.active ? CHANNEL_LABEL_COLOR_ACTIVE_G
+                                   : CHANNEL_LABEL_COLOR_INACTIVE_G;
+        const int seg_b = f.active ? CHANNEL_LABEL_COLOR_ACTIVE_B
+                                   : CHANNEL_LABEL_COLOR_INACTIVE_B;
+        draw7Segment(x + label_x, y + 10, v / 10, seg_r, seg_g, seg_b, 8, 7);
+        draw7Segment(x + label_x + 11, y + 10, v % 10, seg_r, seg_g, seg_b, 8, 7);
+        renderBitmapText("SPU", x + label_x - 1, y + 31, seg_r, seg_g, seg_b);
+        renderBitmapText("PS1", x + label_x - 1, y + 39, seg_r / 2, seg_g / 2, seg_b / 2);
 
         // PIT on the first line, VOL underneath.
         snprintf(text, sizeof(text), "PIT %04X", f.pitch & 0x3FFF);
