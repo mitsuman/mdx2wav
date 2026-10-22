@@ -529,6 +529,7 @@ void help() {
     "  --ym2151-ch <n>     : set number of YM2151 channels to display (1-8, default:8).\n"
     "  --adpcm-ch <n>      : set number of ADPCM channels to display (1-8, default:8).\n"
     "  --waveform-scale <n>: set waveform amplitude scale (0.1-10.0, default:1.0).\n"
+    "  --spectrum          : show the spectrum analyzer (off by default; wider window).\n"
 #endif
     "  -l <loop> : set loop limit. (default:2, MDX only; SPC loops are controlled by the SPC program)\n"
     "  -m        : measure play time as sec.\n"
@@ -757,8 +758,10 @@ int main(int argc, char **argv) {
         ? 844
         : (is_spc ? 720
                   : 75 + (ym2151_channels * 70) + (adpcm_channels * 45) + 20);
-    // The PSF layout has no spectrum strip, so the window is narrower.
-    const int window_width = is_psf ? 1080 : 1400;
+    // The spectrum strip is opt-in (--spectrum); without it the window is
+    // narrower.  PSF never shows a spectrum.
+    const bool want_spectrum = options.enable_spectrum && !is_psf;
+    const int window_width = want_spectrum ? 1400 : 1080;
 
     // 動画モードの場合は高さを偶数に調整（H.264要件）
     if (video_filename && (window_height % 2) != 0) {
@@ -767,6 +770,7 @@ int main(int argc, char **argv) {
 
     // ビジュアライザー初期化
     visualizer = new Visualizer();
+    visualizer->setSpectrumEnabled(want_spectrum);
     bool init_success = false;
 
     if (video_filename) {
@@ -803,8 +807,9 @@ int main(int argc, char **argv) {
     // 波形スケールを設定
     visualizer->setWaveformScale(ym2151_waveform_scale, adpcm_waveform_scale);
 
-    // スペクトラムデバッグモードを設定
+    // スペクトラムデバッグモードを設定（指定時はスペクトラムも有効化）
     if (spectrum_debug_filename) {
+      visualizer->setSpectrumEnabled(true);
       visualizer->setSpectrumDebug(spectrum_debug_filename);
     }
 

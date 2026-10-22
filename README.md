@@ -76,6 +76,13 @@ See [web/README.md](web/README.md) for the build requirements and details. The
 browser output is bit-exact with the native `mdx2wav` for MDX, and within one
 LSB on a handful of samples for SPC, over the first seconds of playback.
 
+## Spectrum analyzer
+
+The per-channel spectrum strip is off by default, which keeps the window at
+1080 px wide.  Pass `--spectrum` to show it; the window then uses the 1400 px
+layout with a 300 px spectrum strip on the right.  It costs 16 FFTs per frame,
+so it is opt-in.
+
 ## PSF support
 
 PSF (PlayStation Sound Format, `.psf` / `.minipsf`) files contain PlayStation
@@ -119,6 +126,6 @@ support is a GPLv2 work; the rest of the project stays Apache-2.0.
 small read-only accessors added for the visualizer.  See
 [gamdx/snes_spc/README.md](gamdx/snes_spc/README.md).  The SPC layout shows all
 eight voices with note, pitch, envelope, source/loop addresses, the actual
-per-voice DSP output waveform, keyboard, per-voice spectrum, and the global S-DSP status (master and
+per-voice DSP output waveform, keyboard, and the global S-DSP status (master and
 echo volumes, KON, directory, program counter).  On macOS, `-p` direct audio
 playback works for SPC too; combine it with `-g` for sound and the visualizer.

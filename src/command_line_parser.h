@@ -13,6 +13,7 @@ struct CommandLineOptions {
   bool get_title = false;
   bool play_audio = false;
   bool enable_visualizer = false;
+  bool enable_spectrum = false;
   bool swap_channels = false;
   bool show_help = false;
   bool show_version = false;

@@ -147,6 +147,11 @@ bool CommandLineParser::HandleLongOption(const std::string& arg, int& index, Com
     options->video_fps = fps;
     return true;
   }
+  if (name == "spectrum") {
+    options->enable_spectrum = true;
+    options->enable_visualizer = true;
+    return true;
+  }
   if (name == "psf-bios") {
     std::string str;
     if (!require_value(&str)) {
@@ -243,7 +248,8 @@ bool CommandLineParser::HandleLongOption(const std::string& arg, int& index, Com
   if (name == "video" || name == "video-fps" || name == "screenshot" ||
       name == "ym2151-ch" || name == "adpcm-ch" ||
       name == "ym2151-waveform-scale" || name == "adpcm-waveform-scale" ||
-      name == "waveform-scale" || name == "spectrum-debug") {
+      name == "waveform-scale" || name == "spectrum-debug" ||
+      name == "spectrum") {
     *error_message = "Visualizer support is not enabled.";
     return false;
   }
