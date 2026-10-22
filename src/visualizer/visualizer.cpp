@@ -1174,8 +1174,27 @@ void Visualizer::renderPSF() {
         const int y = start_y + v * row_h;
         const int x = 0;
 
+        // Key colour phase: a key-on always shows the key-on colour for at
+        // least this frame, and attack/release are held briefly because the
+        // SPU envelope can leave them in less than a frame.
+        // Use the player clock, not wall time: video frames are rendered much
+        // faster than real time.
+        const double now_phase = elapsed_time_;
+        int phase = f.active ? f.phase : 0;
+        if (f.note_on) {
+            phase = 1;
+            psf_phase_hold_[v] = 1;
+            psf_phase_until_[v] = now_phase + 0.25;
+        } else if (phase == 1 || phase == 4) {
+            psf_phase_hold_[v] = phase;
+            psf_phase_until_[v] = now_phase + 0.25;
+        } else if (now_phase < psf_phase_until_[v] &&
+                   (phase == 0 || phase == 3)) {
+            phase = psf_phase_hold_[v];
+        }
+
         int pr = 60, pg = 60, pb = 80;
-        getEGPhaseColor(f.active ? f.phase : 0, pr, pg, pb);
+        getEGPhaseColor(phase, pr, pg, pb);
 
         // The key position is fixed at note-on; later pitch changes only move
         // the green dot, exactly like the SPC keyboard.
@@ -1197,6 +1216,12 @@ void Visualizer::renderPSF() {
         draw7Segment(x + label_x + 7, y + 7, v % 10, seg_r, seg_g, seg_b, 6, 5);
         renderBitmapText("SPU", x + label_x, y + 24, seg_r, seg_g, seg_b);
         renderBitmapText("PS1", x + label_x, y + 31, seg_r / 2, seg_g / 2, seg_b / 2);
+
+        // Envelope phase at the bottom of the row, like the SPC panel.
+        static const char* kPhaseNames[] = {"REL", "ATK", "DEC", "SUS", "REL"};
+        const char* phase_name = "---";
+        if (f.active && phase >= 0 && phase <= 4) phase_name = kPhaseNames[phase];
+        renderBitmapText(phase_name, x + label_x, y + 39, pr, pg, pb);
 
         snprintf(text, sizeof(text), "PIT %04X", f.pitch & 0x3FFF);
         renderBitmapText(text, x + label_x + 42, y + 4,
@@ -1232,7 +1257,7 @@ void Visualizer::renderPSF() {
                 levelToMeter((int)(((long long)vol * env) / 0x7FFF));
 
             // Peak hold on the volume, not on the ADSR-modulated level.
-            const double now_s = SDL_GetTicks() / 1000.0;
+            const double now_s = elapsed_time_;
             if (vol_norm >= psf_peak_[v]) {
                 psf_peak_[v] = vol_norm;
                 psf_peak_time_[v] = now_s;
