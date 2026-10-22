@@ -764,7 +764,7 @@ void Visualizer::update() {
         renderChannelInfo();
         renderKeyboard();
     }
-    if (spectrum_enabled_) {
+    if (spectrum_enabled_ && !psf_mode_) {
         renderSpectrum();
     }
     //renderWaveform();
@@ -817,7 +817,7 @@ bool Visualizer::renderVideoFrame() {
         renderChannelInfo();
         renderKeyboard();
     }
-    if (spectrum_enabled_) {
+    if (spectrum_enabled_ && !psf_mode_) {
         renderSpectrum();
     }
     
@@ -1040,94 +1040,166 @@ void Visualizer::updatePSFState(const PSFVoice* voices, int count,
     psf_reverb_ = reverb;
 }
 
-// PSF (PlayStation SPU) panel: 24 voices with their pitch, volume, envelope
-// and sample addresses.
+// PSF (PlayStation SPU) panel: 24 voices in two columns of 12, plus a compact
+// keyboard that shows the note of every active voice.
 void Visualizer::renderPSF() {
-    TTF_Font* font = (TTF_Font*)font_small_;
-    if (!font) return;
-
-    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 0);
-    const int row_h = 25;
-    const int start_y = 52;
+    const int col_w = window_width_ / 2;
+    const int row_h = 26;
+    const int start_y = 64;
     const int label_x = 12;
-    const int pitch_x = 70;
-    const int vol_x = 170;
-    const int env_x = 300;
-    const int addr_x = 470;
 
     char text[128];
     snprintf(text, sizeof(text),
              "PLAYSTATION / SPU 24 VOICES   MVOLL %02X  MVOLR %02X  REVERB %s",
              psf_master_left_ & 0xFF, psf_master_right_ & 0xFF,
              psf_reverb_ ? "ON" : "OFF");
-    renderBitmapText(text, label_x, start_y - 16, 120, 160, 220);
+    renderBitmapText(text, label_x, start_y - 20, 120, 160, 220);
 
-    static const Uint8 colors[6][3] = {
-        {60, 200, 255}, {80, 255, 120}, {255, 220, 100},
-        {255, 140, 180}, {180, 160, 255}, {255, 180, 120},
+    // Voice colours: one per pair of voices so the keyboard stays readable.
+    static const Uint8 colors[12][3] = {
+        {80, 210, 255}, {120, 255, 140}, {255, 220, 100}, {255, 150, 180},
+        {190, 170, 255}, {255, 190, 120}, {120, 230, 220}, {230, 150, 255},
+        {180, 230, 120}, {255, 170, 150}, {150, 190, 255}, {240, 240, 160},
     };
 
     for (int v = 0; v < 24; v++) {
         const PSFVoice& f = psf_voices_[v];
-        const int y = start_y + v * row_h;
-        const Uint8* col = colors[v % 6];
+        const int col = v / 12;
+        const int row = v % 12;
+        const int x = col * col_w;
+        const int y = start_y + row * row_h;
+        const Uint8* colr = colors[v % 12];
 
-        // Voice number and key-on indicator
-        SDL_Rect dot = {label_x + 2, y + 6, 6, 6};
-        SDL_SetRenderDrawColor(renderer_, f.active ? col[0] : 40,
-                               f.active ? col[1] : 40,
-                               f.active ? col[2] : 60, 255);
+        SDL_Rect dot = {x + label_x, y + 6, 6, 6};
+        SDL_SetRenderDrawColor(renderer_, f.active ? colr[0] : 35,
+                               f.active ? colr[1] : 35,
+                               f.active ? colr[2] : 55, 255);
         SDL_RenderFillRect(renderer_, &dot);
 
         snprintf(text, sizeof(text), "%02d", v);
-        renderBitmapText(text, label_x + 12, y + 4, f.active ? 220 : 90,
-                         f.active ? 230 : 100, 255);
+        renderBitmapText(text, x + label_x + 10, y + 4,
+                         f.active ? 210 : 85, f.active ? 220 : 95,
+                         f.active ? 255 : 120);
 
         snprintf(text, sizeof(text), "PIT %04X", f.pitch & 0x3FFF);
-        renderBitmapText(text, pitch_x, y + 4, f.active ? 120 : 60,
-                         f.active ? 200 : 80, 255);
-
-        // Pitch bar: 0x1000 (32 kHz) is the reference point.
-        {
-            SDL_Rect bar = {pitch_x, y + 16, 90, 3};
-            SDL_SetRenderDrawColor(renderer_, 30, 30, 60, 255);
-            SDL_RenderFillRect(renderer_, &bar);
-            int w = (f.pitch * 90) / 0x4000;
-            if (w > 90) w = 90;
-            if (w > 0 && f.active) {
-                bar.w = w;
-                SDL_SetRenderDrawColor(renderer_, col[0], col[1], col[2], 255);
-                SDL_RenderFillRect(renderer_, &bar);
-            }
-            SDL_Rect ref = {pitch_x + 90 * 0x1000 / 0x4000, y + 15, 1, 5};
-            SDL_SetRenderDrawColor(renderer_, 120, 140, 200, 255);
-            SDL_RenderFillRect(renderer_, &ref);
-        }
+        renderBitmapText(text, x + label_x + 32, y + 4,
+                         f.active ? 120 : 55, f.active ? 200 : 70,
+                         f.active ? 255 : 95);
 
         snprintf(text, sizeof(text), "VOL %04X %04X",
                  f.volume_left & 0x3FFF, f.volume_right & 0x3FFF);
-        renderBitmapText(text, vol_x, y + 4, f.active ? 180 : 60,
-                         f.active ? 180 : 60, f.active ? 220 : 80);
+        renderBitmapText(text, x + label_x + 100, y + 4,
+                         f.active ? 170 : 50, f.active ? 175 : 55,
+                         f.active ? 220 : 80);
 
         // Envelope bar
-        {
-            SDL_Rect bar = {env_x, y + 8, 100, 8};
-            SDL_SetRenderDrawColor(renderer_, 30, 30, 60, 255);
+        SDL_Rect bar = {x + label_x + 200, y + 7, 70, 8};
+        SDL_SetRenderDrawColor(renderer_, 28, 28, 55, 255);
+        SDL_RenderFillRect(renderer_, &bar);
+        int w = (f.envelope * 70) / 0x7FFF;
+        if (w > 70) w = 70;
+        if (w > 0 && f.active) {
+            bar.w = w;
+            SDL_SetRenderDrawColor(renderer_, colr[0], colr[1], colr[2], 255);
             SDL_RenderFillRect(renderer_, &bar);
-            int w = (f.envelope * 100) / 0x7FFF;
-            if (w > 100) w = 100;
-            if (w > 0 && f.active) {
-                bar.w = w;
-                SDL_SetRenderDrawColor(renderer_, col[0], col[1], col[2], 255);
-                SDL_RenderFillRect(renderer_, &bar);
-            }
         }
 
-        snprintf(text, sizeof(text), "ADSR %04X %04X  SSA %05X  NAX %05X",
-                 f.adsr1 & 0xFFFF, f.adsr2 & 0xFFFF,
-                 f.start_address & 0x7FFFF, f.current_address & 0x7FFFF);
-        renderBitmapText(text, addr_x, y + 4, f.active ? 150 : 60,
-                         f.active ? 160 : 70, f.active ? 200 : 90);
+        snprintf(text, sizeof(text), "ADSR %04X %04X",
+                 f.adsr1 & 0xFFFF, f.adsr2 & 0xFFFF);
+        renderBitmapText(text, x + label_x + 282, y + 4,
+                         f.active ? 140 : 45, f.active ? 150 : 50,
+                         f.active ? 190 : 75);
+
+        if (f.note > 0) {
+            const int octave = f.note / 12 - 1;
+            snprintf(text, sizeof(text), "%s%d", getNoteName(f.note), octave);
+            renderBitmapText(text, x + label_x + 390, y + 4,
+                             f.active ? 190 : 60, f.active ? 230 : 70,
+                             f.active ? 190 : 80);
+        }
+    }
+
+    // ---- Keyboard (5 octaves, C1..C6) ----
+    const int low_note = 24;   // C1
+    const int octaves = 5;
+    const int white_w = 16;
+    const int white_h = 70;
+    const int black_w = 10;
+    const int black_h = 46;
+    const int keyboard_w = octaves * 7 * white_w;
+    const int keyboard_x = (window_width_ - keyboard_w) / 2;
+    const int keyboard_y = start_y + 12 * row_h + 18;
+
+    static const int kWhiteSemis[7] = {0, 2, 4, 5, 7, 9, 11};
+    static const int kBlackSemis[5] = {1, 3, 6, 8, 10};
+    static const int kBlackOffsets[5] = {0, 1, 3, 4, 5};
+
+    // Remember the centre of each key so the notes can be plotted on top.
+    int key_x[128];
+    int key_w[128];
+    for (int i = 0; i < 128; i++) { key_x[i] = -1; key_w[i] = 0; }
+
+    int white_index = 0;
+    for (int o = 0; o < octaves; o++) {
+        for (int i = 0; i < 7; i++) {
+            const int note = low_note + o * 12 + kWhiteSemis[i];
+            const int x = keyboard_x + white_index * white_w;
+            SDL_Rect key = {x, keyboard_y, white_w - 1, white_h};
+            SDL_SetRenderDrawColor(renderer_, 205, 210, 235, 255);
+            SDL_RenderFillRect(renderer_, &key);
+            SDL_SetRenderDrawColor(renderer_, 70, 75, 120, 255);
+            SDL_RenderDrawRect(renderer_, &key);
+            if (i == 0) {
+                // Octave number inside the key, so the read-out below the
+                // keyboard has a free line.
+                snprintf(text, sizeof(text), "%d", o + 1);
+                renderBitmapText(text, x + 3, keyboard_y + white_h - 12,
+                                 120, 135, 190);
+            }
+            key_x[note] = x + white_w / 2;
+            key_w[note] = white_w;
+            white_index++;
+        }
+    }
+    for (int o = 0; o < octaves; o++) {
+        for (int i = 0; i < 5; i++) {
+            const int note = low_note + o * 12 + kBlackSemis[i];
+            const int x = keyboard_x + (o * 7 + kBlackOffsets[i]) * white_w +
+                          white_w - black_w / 2;
+            SDL_Rect key = {x, keyboard_y, black_w, black_h};
+            SDL_SetRenderDrawColor(renderer_, 30, 30, 55, 255);
+            SDL_RenderFillRect(renderer_, &key);
+            SDL_SetRenderDrawColor(renderer_, 90, 95, 140, 255);
+            SDL_RenderDrawRect(renderer_, &key);
+            key_x[note] = x + black_w / 2;
+            key_w[note] = black_w;
+        }
+    }
+
+    // Notes of the active voices, drawn above their key.
+    for (int v = 0; v < 24; v++) {
+        const PSFVoice& f = psf_voices_[v];
+        if (!f.active || f.note <= 0 || f.note >= 128) continue;
+        if (key_x[f.note] < 0) continue;
+        const Uint8* colr = colors[v % 12];
+        SDL_SetRenderDrawColor(renderer_, colr[0], colr[1], colr[2], 255);
+        SDL_Rect mark = {key_x[f.note] - 2, keyboard_y - 7, 5, 5};
+        SDL_RenderFillRect(renderer_, &mark);
+        SDL_Rect line = {key_x[f.note], keyboard_y - 2, 1, 6};
+        SDL_RenderFillRect(renderer_, &line);
+    }
+
+    // Note name of the lowest active voice, as a quick read-out.
+    for (int v = 0; v < 24; v++) {
+        const PSFVoice& f = psf_voices_[v];
+        if (!f.active || f.note <= 0) continue;
+        const int octave = f.note / 12 - 1;
+        snprintf(text, sizeof(text), "NOTE %s%d (%d)", getNoteName(f.note),
+                 octave, f.note);
+        const int len = (int)strlen(text) * bitmap_char_width_;
+        renderBitmapText(text, keyboard_x + (keyboard_w - len) / 2,
+                         keyboard_y + white_h + 6, 200, 220, 255);
+        break;
     }
 }
 

@@ -86,8 +86,10 @@ PlayStation BIOS image, which cannot be bundled: pass one with
 `~/.config/mdx2wav/psx-bios.bin`.  Song length and fade come from the
 `length` / `fade` tags, and `-t` prints the title.
 
-The PSF panel shows the 24 SPU voices with their pitch, L/R volume, envelope,
-ADSR settings and sample addresses.  Only PSF1 is supported (PSF2 would need a
+The PSF panel shows the 24 SPU voices in two columns (12 + 12) with their
+pitch, L/R volume, envelope, ADSR settings and note, plus a compact five-octave
+keyboard.  Notes are derived from the pitch register and the decoded VAG
+sample's own tuning, so they are absolute rather than guessed from the mix.  Only PSF1 is supported (PSF2 would need a
 PS2 emulator), and the web build does not include the PSF core yet.
 
 Note that `gamdx/psf/he/` is GPLv2 (PCSX-derived), so a binary built with PSF

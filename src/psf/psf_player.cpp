@@ -144,6 +144,92 @@ bool ReadWholeFile(const char* path, std::vector<uint8_t>* out) {
 
 }  // namespace
 
+namespace {
+
+// PS1 VAG/ADPCM: 16-byte blocks, 28 samples each.  The predictor
+// coefficients are the ones used by the SPU core.
+const int kVagCoef1[5] = {0, 60, 115, 98, 122};
+const int kVagCoef2[5] = {0, 0, -52, -55, -60};
+
+// Decode up to max_samples of the sample that starts at `addr` (a byte address
+// in SPU RAM).
+int DecodeVag(const uint16_t* ram, int addr, int16_t* out, int max_samples) {
+  if (!ram || addr <= 0) return 0;
+  int written = 0;
+  int p1 = 0, p2 = 0;
+  for (int block = 0; block < 256 && written + 28 <= max_samples; block++) {
+    const int header = ram[(addr >> 1) & 0x1FFFF];
+    const int shift = header & 0x0F;
+    const int filter = (header >> 4) & 0x07;
+    const int coef1 = kVagCoef1[filter > 4 ? 4 : filter];
+    const int coef2 = kVagCoef2[filter > 4 ? 4 : filter];
+
+    for (int word = 0; word < 7; word++) {
+      const int data = ram[((addr >> 1) + 1 + word) & 0x1FFFF];
+      for (int nib = 0; nib < 4; nib++) {
+        int v = (data >> (nib * 4)) & 0x0F;
+        if (v >= 8) v -= 16;
+        v = (v << 12) >> shift;  // PS1 ADPCM: 12-bit sample with a shift
+        v += ((coef1 * p2) + (coef2 * p1) + 32) >> 6;
+        if (v > 32767) v = 32767;
+        if (v < -32768) v = -32768;
+        out[written++] = (int16_t)v;
+        p1 = p2;
+        p2 = v;
+      }
+    }
+
+    const bool end = (header & 0x0100) != 0;
+    addr += 16;
+    if (end) break;
+  }
+  return written;
+}
+
+// Estimate the note of a decoded sample at 44.1 kHz with a normalized
+// autocorrelation.  Returns 0 for silence and unpitched material.
+float EstimateVagTune(const int16_t* samples, int count) {
+  if (!samples || count < 128) return 0.0f;
+
+  double mean = 0.0;
+  for (int i = 0; i < count; i++) mean += samples[i];
+  mean /= count;
+
+  const int max_lag = std::min(count / 2, 512);
+  if (max_lag < 8) return 0.0f;
+
+  double best = 0.0;
+  std::vector<double> norms(max_lag + 1, 0.0);
+  for (int lag = 8; lag <= max_lag; lag++) {
+    double corr = 0.0, ea = 0.0, eb = 0.0;
+    for (int i = 0; i + lag < count; i++) {
+      const double a = samples[i] - mean;
+      const double b = samples[i + lag] - mean;
+      corr += a * b;
+      ea += a * a;
+      eb += b * b;
+    }
+    if (ea > 1e-9 && eb > 1e-9) {
+      norms[lag] = corr / sqrt(ea * eb);
+      if (norms[lag] > best) best = norms[lag];
+    }
+  }
+  if (best < 0.5) return 0.0f;
+
+  const double threshold = best * 0.85;
+  for (int lag = 9; lag < max_lag; lag++) {
+    if (norms[lag] >= threshold && norms[lag] >= norms[lag - 1] &&
+        norms[lag] >= norms[lag + 1]) {
+      const double freq = 44100.0 / (double)lag;
+      if (freq < 25.0 || freq > 4000.0) return 0.0f;
+      return (float)(69.0 + 12.0 * log(freq / 440.0) / log(2.0));
+    }
+  }
+  return 0.0f;
+}
+
+}  // namespace
+
 PSFPlayer::PSFPlayer()
     : state_(nullptr),
       loaded_(false),
@@ -278,6 +364,7 @@ bool PSFPlayer::Load(const char* path, const char* bios_path, std::string* error
   elapsed_ = 0.0;
   duration_ = 0.0;
   exes_.clear();
+  sample_tunes_.clear();
   title_.clear();
   game_.clear();
   artist_.clear();
@@ -442,6 +529,28 @@ void PSFPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
     s.current_address = (int)spu_getreg_voice(spu, v, SPUREG_VOICE_NAX);
     s.active = s.envelope > 0 || (kon & (1u << v)) != 0;
     s.waveform_samples = 0;
+
+    // Note = the sample's own note (at pitch 0x1000) plus the pitch register.
+    if (s.active && s.pitch > 0 && s.start_address > 0) {
+      auto it = sample_tunes_.find(s.start_address);
+      float tune;
+      if (it == sample_tunes_.end()) {
+        int16_t decoded[1024];
+        const uint16_t* ram = spu_get_ram(spu);
+        const int count = DecodeVag(ram, s.start_address, decoded, 1024);
+        tune = EstimateVagTune(decoded, count);
+        sample_tunes_[s.start_address] = tune > 0.0f ? tune : -1.0f;
+        if (tune <= 0.0f) tune = 0.0f;
+      } else {
+        tune = it->second > 0.0f ? it->second : 0.0f;
+      }
+      if (tune > 0.0f) {
+        float n = tune + 12.0f * (float)log2((double)s.pitch / 4096.0);
+        if (n < 0.0f) n = 0.0f;
+        if (n > 127.0f) n = 127.0f;
+        s.note = (int)(n + 0.5f);
+      }
+    }
   }
 }
 

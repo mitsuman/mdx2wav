@@ -153,6 +153,9 @@ uint32 EMU_CALL spu_getreg_main(void *state, uint32 n) {
 uint32 EMU_CALL spu_getreg_flag(void *state, uint32 n) {
   return (uint32)spucore_getflag(CORESTATE(0), n);
 }
+uint16* EMU_CALL spu_get_ram(void *state) {
+  return (uint16*)SPURAM;
+}
 
 static uint32 EMU_CALL get_tsa(struct SPU_STATE *state, uint32 core) {
   return state->tsa[core];

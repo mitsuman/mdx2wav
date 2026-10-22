@@ -717,9 +717,10 @@ int main(int argc, char **argv) {
       ym2151_channels = 8;
       adpcm_channels = 0;
     }
-    int window_height = (is_spc || is_psf)
-        ? 720
-        : 75 + (ym2151_channels * 70) + (adpcm_channels * 45) + 20;
+    int window_height = is_psf
+        ? 520
+        : (is_spc ? 720
+                  : 75 + (ym2151_channels * 70) + (adpcm_channels * 45) + 20);
 
     // 動画モードの場合は高さを偶数に調整（H.264要件）
     if (video_filename && (window_height % 2) != 0) {
@@ -1076,6 +1077,7 @@ reload_file:
           for (int vi = 0; vi < PSFPlayer::kVoices; vi++) {
             out[vi].active = pv[vi].active;
             out[vi].pitch = pv[vi].pitch;
+            out[vi].note = pv[vi].note;
             out[vi].volume_left = pv[vi].volume_left;
             out[vi].volume_right = pv[vi].volume_right;
             out[vi].envelope = pv[vi].envelope;

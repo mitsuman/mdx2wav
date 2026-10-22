@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -22,7 +23,8 @@ class PSFPlayer {
 
   struct VoiceState {
     bool active;          // envelope is not fully released
-    int pitch;            // 0x0000-0x3FFF
+    int pitch;            // 0x0000-0x3FFF (0x1000 = 44.1 kHz)
+    int note;             // MIDI note derived from the pitch and the sample
     int volume_left;      // 0x0000-0x3FFF
     int volume_right;
     int envelope;         // current envelope level (0-0x7FFF)
@@ -102,6 +104,7 @@ class PSFPlayer {
 
   SPCResampler resampler_;
   std::vector<int16_t> raw_;
+  mutable std::map<int, float> sample_tunes_;  // sample start address -> note
 };
 
 #endif  // PSF_PLAYER_H

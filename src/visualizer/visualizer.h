@@ -125,6 +125,7 @@ public:
     struct PSFVoice {
         bool active;
         int pitch;
+        int note;
         int volume_left;
         int volume_right;
         int envelope;
