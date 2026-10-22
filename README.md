@@ -96,7 +96,9 @@ and the playing key is coloured by the SPU envelope state (green attack,
 orange decay, blue sustain, purple release), the same palette as SPC.  Each
 row also has a level meter: the bar is the voice volume and the bright part is
 the level actually used at synthesis (volume x ADSR), shown on a -60..0 dB
-scale because the raw PS1 voice levels are only a few percent.  As in
+scale because the raw PS1 voice levels are only a few percent.  Below it a
+thin bar shows the sample playback position (orange point) inside the VAG
+sample, with the loop point as a yellow tick, like the SPC panel.  As in
 the SPC panel the key is latched at note-on and later pitch changes move a
 green dot above the keyboard instead of the key.
 Notes are derived from the pitch register and the decoded VAG sample's own

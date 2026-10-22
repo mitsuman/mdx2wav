@@ -136,6 +136,8 @@ public:
         int start_address;
         int loop_address;
         int current_address;
+        int sample_start;
+        int sample_end;
     };
     void setPSFMode(bool enabled);
     bool isPSFMode() const { return psf_mode_; }

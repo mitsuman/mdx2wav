@@ -1143,7 +1143,7 @@ void Visualizer::renderPSF() {
         {
             const int meter_x = x + label_x + 130;
             const int meter_y = y + 16;
-            const int meter_w = 70;
+            const int meter_w = 100;
             const int meter_h = 9;
 
             SDL_Rect bg = {meter_x, meter_y, meter_w, meter_h};
@@ -1183,6 +1183,46 @@ void Visualizer::renderPSF() {
                 if (lb.w > 0) {
                     SDL_SetRenderDrawColor(renderer_, pr, pg, pb, 255);
                     SDL_RenderFillRect(renderer_, &lb);
+                }
+            }
+        }
+
+        // Sample playback position (like the SPC bar): the orange point
+        // follows the VAG block currently being played; the yellow tick is
+        // the loop point.
+        if (f.active && f.sample_start > 0 && f.sample_end > f.sample_start) {
+            const int bar_x = x + label_x + 130;
+            const int bar_y = y + 31;
+            const int bar_w = 100;
+            const int bar_h = 4;
+            const int start = f.sample_start;
+            const int end = f.sample_end;
+            const int span = end - start;
+            if (span > 0) {
+                int pos = f.current_address;
+                if (pos < start) pos = start;
+                if (pos > end) pos = end;
+                const int played = (pos - start) * (bar_w - 2) / span;
+
+                SDL_Rect bg = {bar_x, bar_y, bar_w, bar_h};
+                SDL_SetRenderDrawColor(renderer_, 30, 30, 50, 255);
+                SDL_RenderFillRect(renderer_, &bg);
+                SDL_SetRenderDrawColor(renderer_, 60, 70, 110, 255);
+                SDL_RenderDrawRect(renderer_, &bg);
+
+                SDL_SetRenderDrawColor(renderer_, f.active ? 255 : 150,
+                                       f.active ? 150 : 80, 0, 255);
+                SDL_Rect point = {bar_x + 1 + played - 1, bar_y - 1, 3, bar_h + 2};
+                if (point.x < bar_x + 1) point.x = bar_x + 1;
+                if (point.x > bar_x + bar_w - 3) point.x = bar_x + bar_w - 3;
+                SDL_RenderFillRect(renderer_, &point);
+
+                if (f.loop_address >= start && f.loop_address < end) {
+                    const int loop_x =
+                        bar_x + 1 + (f.loop_address - start) * (bar_w - 2) / span;
+                    SDL_SetRenderDrawColor(renderer_, 255, 220, 120, 230);
+                    SDL_RenderDrawLine(renderer_, loop_x, bar_y - 1, loop_x,
+                                       bar_y + bar_h);
                 }
             }
         }

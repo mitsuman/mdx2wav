@@ -1088,6 +1088,8 @@ reload_file:
             out[vi].start_address = pv[vi].start_address;
             out[vi].loop_address = pv[vi].loop_address;
             out[vi].current_address = pv[vi].current_address;
+            out[vi].sample_start = pv[vi].sample_start;
+            out[vi].sample_end = pv[vi].sample_end_address;
           }
           visualizer->updatePSFState(out, PSFPlayer::kVoices,
                                      gs.master_volume_left, gs.master_volume_right,

@@ -367,6 +367,7 @@ bool PSFPlayer::Load(const char* path, const char* bios_path, std::string* error
   duration_ = 0.0;
   exes_.clear();
   sample_tunes_.clear();
+  sample_ends_.clear();
   for (int i = 0; i < kVoices; i++) key_on_seen_[i] = 0;
   title_.clear();
   game_.clear();
@@ -534,6 +535,38 @@ void PSFPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
     s.start_address = (int)spu_getreg_voice(spu, v, SPUREG_VOICE_SSA);
     s.loop_address = (int)spu_getreg_voice(spu, v, SPUREG_VOICE_LSAX);
     s.current_address = (int)spu_getreg_voice(spu, v, SPUREG_VOICE_NAX);
+    if (s.start_address > 0) {
+      // The playback-position meter follows the region that is actually
+      // playing.  The loop-start register is hardware-updated and therefore
+      // reliable once the voice has reached its loop point, while SSA can
+      // already hold the next sample; prefer the loop start when it contains
+      // the current address.
+      const uint16_t* ram = spu_get_ram(spu);
+      int start = s.start_address;
+      if (s.loop_address > 0 && s.loop_address <= s.current_address &&
+          s.loop_address < 0x80000) {
+        start = s.loop_address;
+      }
+      auto findEnd = [&](int from) -> int {
+        auto it = sample_ends_.find(from);
+        if (it != sample_ends_.end()) return it->second;
+        int addr = from;
+        for (int block = 0; block < 4096; block++) {
+          const int header = ram[(addr >> 1) & 0x1FFFF];
+          addr += 16;
+          if (header & 0x0100) break;
+        }
+        sample_ends_[from] = addr;
+        return addr;
+      };
+      int end = findEnd(start);
+      if (s.current_address < start || s.current_address > end) {
+        start = s.start_address;
+        end = findEnd(start);
+      }
+      s.sample_start = start;
+      s.sample_end_address = end;
+    }
     s.active = s.envelope > 0 || (kon & (1u << v)) != 0;
     s.waveform_samples = 0;
 

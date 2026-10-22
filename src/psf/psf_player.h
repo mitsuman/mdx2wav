@@ -32,9 +32,11 @@ class PSFPlayer {
     int adsr1;
     int adsr2;
     int phase;            // 0 off, 1 attack, 2 decay, 3 sustain, 4 release
-    int start_address;    // SPU RAM address / 8
+    int start_address;    // byte address in SPU RAM
     int loop_address;
     int current_address;
+    int sample_start;        // start of the region the meter tracks
+    int sample_end_address;  // byte address just past the VAG end flag
     int16_t waveform[kWaveformSamples];
     int waveform_samples;
   };
@@ -107,6 +109,7 @@ class PSFPlayer {
   SPCResampler resampler_;
   std::vector<int16_t> raw_;
   mutable std::map<int, float> sample_tunes_;  // sample start address -> note
+  mutable std::map<int, int> sample_ends_;     // start address -> end address
   mutable uint32_t key_on_seen_[kVoices];      // last KON counter seen
 };
 
