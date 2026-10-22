@@ -279,6 +279,27 @@ void Visualizer::draw7Segment(int x, int y, int digit, int r, int g, int b, int 
 }
 
 // チャンネル色を取得（アルゴリズムベース）
+void Visualizer::getSampleColor(int sample_start, int& r, int& g, int& b) {
+    // Hash the SPU sample start address and pick from a fixed palette, so the
+    // same sample always gets the same colour (like the SPC channel colours).
+    static const int palette[16][3] = {
+        {100, 150, 255}, {150, 100, 255}, {100, 200, 255}, {200, 150, 255},
+        {120, 180, 255}, {180, 120, 255}, {100, 220, 200}, {160, 160, 255},
+        {120, 255, 140}, {255, 220, 100}, {255, 150, 180}, {255, 190, 120},
+        {120, 230, 220}, {230, 150, 255}, {180, 230, 120}, {255, 170, 150},
+    };
+    unsigned int h = (unsigned int)sample_start;
+    h ^= h >> 16;
+    h *= 0x7feb352du;
+    h ^= h >> 15;
+    h *= 0x846ca68bu;
+    h ^= h >> 16;
+    const int idx = (int)(h % 16);
+    r = palette[idx][0];
+    g = palette[idx][1];
+    b = palette[idx][2];
+}
+
 void Visualizer::getChannelColor(int ch, int& r, int& g, int& b) {
     // アルゴリズム番号で異なる色を割り当て（青紫系）
     static const int colors[8][3] = {

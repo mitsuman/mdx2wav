@@ -1217,6 +1217,18 @@ void Visualizer::renderPSF() {
         renderBitmapText("SPU", x + label_x, y + 24, seg_r, seg_g, seg_b);
         renderBitmapText("PS1", x + label_x, y + 31, seg_r / 2, seg_g / 2, seg_b / 2);
 
+        // Vertical colour bar keyed by the sample start address, like the MDX
+        // channel bar.
+        if (f.start_address > 0) {
+            int sr, sg, sb;
+            getSampleColor(f.start_address, sr, sg, sb);
+            SDL_Rect ch_bar = {x + label_x + 20, y + 4, 8, row_h - 8};
+            SDL_SetRenderDrawColor(renderer_, f.active ? sr : sr / 3,
+                                   f.active ? sg : sg / 3,
+                                   f.active ? sb : sb / 3, 255);
+            SDL_RenderFillRect(renderer_, &ch_bar);
+        }
+
         // Envelope phase at the bottom of the row, like the SPC panel.
         static const char* kPhaseNames[] = {"REL", "ATK", "DEC", "SUS", "REL"};
         const char* phase_name = "---";

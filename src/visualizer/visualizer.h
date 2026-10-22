@@ -398,6 +398,8 @@ private:
     
     // ヘルパー
     void getChannelColor(int ch, int& r, int& g, int& b);
+    // Stable colour for a sample, derived from its start address.
+    void getSampleColor(int sample_start, int& r, int& g, int& b);
 
     // Shared meter parts, used by both the SPC and PSF panels so they always
     // look the same.
