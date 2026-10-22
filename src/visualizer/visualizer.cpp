@@ -615,7 +615,12 @@ void Visualizer::update() {
                     ensureFilerSelectionVisible();
                 } else if ((sym == SDLK_RETURN || sym == SDLK_KP_ENTER) &&
                            file_list_count_ > 0) {
-                    if (file_dirs_ && file_dirs_[filer_selection_]) {
+                    if (!(file_dirs_ && file_dirs_[filer_selection_]) &&
+                        filer_selection_ == current_file_index_) {
+                        // Enter on the song that is already playing just
+                        // closes the list (toggle), without reloading it.
+                        filer_mode_ = false;
+                    } else if (file_dirs_ && file_dirs_[filer_selection_]) {
                         // A directory: descend into it.
                         requested_directory_ = file_list_[filer_selection_];
                         dir_change_requested_ = true;
@@ -646,6 +651,18 @@ void Visualizer::update() {
                 } else if (sym == SDLK_ESCAPE || sym == SDLK_f) {
                     filer_mode_ = false;
                 }
+                continue;
+            }
+
+            if (!filer_mode_ && (sym == SDLK_RETURN || sym == SDLK_KP_ENTER) &&
+                file_list_count_ > 0) {
+                // Enter toggles the file list: open it from the visualizer,
+                // and inside the list the same key plays the selection (which
+                // closes it again for files).
+                filer_mode_ = true;
+                filer_selection_ = current_file_index_;
+                filer_scroll_ = 0;
+                ensureFilerSelectionVisible();
                 continue;
             }
 
