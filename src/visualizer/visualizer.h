@@ -71,6 +71,8 @@ public:
         for (int i = 0; i < 8; i++) {
             keyboard_octave_offset_[i] = 0;
             keyboard_offset_hold_until_s_[i] = 0.0;
+            keyboard_latched_note_[i] = 0;
+            keyboard_key_on_prev_[i] = false;
         }
     }
     bool isSPCMode() const { return spc_mode_; }
@@ -124,6 +126,8 @@ public:
         for (int i = 0; i < 8; i++) {
             keyboard_octave_offset_[i] = 0;
             keyboard_offset_hold_until_s_[i] = 0.0;
+            keyboard_latched_note_[i] = 0;
+            keyboard_key_on_prev_[i] = false;
         }
     }
     
@@ -248,6 +252,8 @@ private:
     // make the keyboard jump back and forth.
     int keyboard_octave_offset_[8];
     double keyboard_offset_hold_until_s_[8];
+    int keyboard_latched_note_[8];
+    bool keyboard_key_on_prev_[8];
     
     // キーボード演奏用のオクターブオフセット
     int octave_offset_;

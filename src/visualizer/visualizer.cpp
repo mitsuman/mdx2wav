@@ -103,6 +103,8 @@ Visualizer::Visualizer()
     for (int i = 0; i < 8; i++) {
         keyboard_octave_offset_[i] = 0;
         keyboard_offset_hold_until_s_[i] = 0.0;
+        keyboard_latched_note_[i] = 0;
+        keyboard_key_on_prev_[i] = false;
     }
 
     // 前フレーム波形データの初期化
@@ -2012,13 +2014,26 @@ void Visualizer::renderKeyboard() {
     for (int ch = 0; ch < ym2151_display_channels_; ch++) {
         auto& channel = channels[ch];
 
+        // The keyboard position is latched at note-on for SPC.  Pitch changes
+        // after that are shown by the green dot, not by moving the key.
+        if (spc_mode_) {
+            if (channel.key_on) {
+                if (!keyboard_key_on_prev_[ch] || keyboard_latched_note_[ch] == 0) {
+                    if (channel.note > 0) keyboard_latched_note_[ch] = channel.note;
+                }
+            }
+            keyboard_key_on_prev_[ch] = channel.key_on;
+        }
+        const int keyboard_note = spc_mode_ ? keyboard_latched_note_[ch]
+                                            : channel.note;
+
         // SPC notes can exceed the C0-C8 range drawn by default.  Shift this
         // voice's keyboard window up by whole octaves so the note stays on
         // screen.  Keep the shift for a couple of seconds after the high note
         // ends so the keyboard does not jump around on every short note.
         int desired_offset = 0;
-        if (spc_mode_ && channel.key_on && channel.note > 96) {
-            desired_offset = (channel.note - 96 + 11) / 12;
+        if (spc_mode_ && channel.key_on && keyboard_note > 96) {
+            desired_offset = (keyboard_note - 96 + 11) / 12;
         }
         const double hold_seconds = 2.0;
         const double now_s = video_mode_ ? elapsed_time_ : SDL_GetTicks() / 1000.0;
@@ -2118,8 +2133,9 @@ void Visualizer::renderKeyboard() {
                 
                 SDL_Rect key_rect = {x, base_y, white_key_width - 1, white_key_height-2};
                 
-                bool pressed = (spc_mode_ ? (channel.key_on && channel.note > 0) : true) &&
-                               (channel.note == midi_note);
+                bool pressed = (spc_mode_ ? (channel.key_on && keyboard_note > 0)
+                                           : true) &&
+                               (keyboard_note == midi_note);
                 
                 if (pressed) {
                     SDL_SetRenderDrawColor(renderer_, r, g, b, 255);
@@ -2131,10 +2147,19 @@ void Visualizer::renderKeyboard() {
                 SDL_SetRenderDrawColor(renderer_, 60, 60, 120, 255);
                 SDL_RenderDrawRect(renderer_, &key_rect);
 
-                // Green pitch dot above the matching key.
+                // Green pitch dot above the matching key.  In SPC mode it also
+                // follows the fractional part of the register-derived pitch, so
+                // vibrato and slides move it smoothly instead of flipping keys.
                 if (channel.key_on && channel.note > 0 && channel.note == midi_note) {
                     SDL_SetRenderDrawColor(renderer_, 100, 255, 100, 255);
-                    SDL_Rect dot = {x + white_key_width / 2 - 2, base_y - 6, 5, 5};
+                    int dot_dx = 0;
+                    if (spc_mode_) {
+                        dot_dx = (int)((channel.spc_pitch_note - (float)midi_note) *
+                                       white_key_width);
+                        if (dot_dx < -4) dot_dx = -4;
+                        if (dot_dx > 4) dot_dx = 4;
+                    }
+                    SDL_Rect dot = {x + white_key_width / 2 - 2 + dot_dx, base_y - 6, 5, 5};
                     SDL_RenderFillRect(renderer_, &dot);
                 }
                 
@@ -2162,7 +2187,7 @@ void Visualizer::renderKeyboard() {
                 
                 SDL_Rect key_rect = {x, base_y, black_key_width, black_key_height};
                 
-                bool pressed = (channel.key_on && channel.note == midi_note);
+                bool pressed = channel.key_on && (keyboard_note == midi_note);
                 
                 if (pressed) {
                     SDL_SetRenderDrawColor(renderer_, r, g, b, 255);
@@ -2176,7 +2201,14 @@ void Visualizer::renderKeyboard() {
 
                 if (channel.key_on && channel.note > 0 && channel.note == midi_note) {
                     SDL_SetRenderDrawColor(renderer_, 100, 255, 100, 255);
-                    SDL_Rect dot = {x + black_key_width / 2 - 2, base_y - 6, 5, 5};
+                    int dot_dx = 0;
+                    if (spc_mode_) {
+                        dot_dx = (int)((channel.spc_pitch_note - (float)midi_note) *
+                                       black_key_width);
+                        if (dot_dx < -3) dot_dx = -3;
+                        if (dot_dx > 3) dot_dx = 3;
+                    }
+                    SDL_Rect dot = {x + black_key_width / 2 - 2 + dot_dx, base_y - 6, 5, 5};
                     SDL_RenderFillRect(renderer_, &dot);
                 }
             }

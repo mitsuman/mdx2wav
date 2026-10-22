@@ -12,7 +12,7 @@ void UpdateSPCVisualizerState(SPCPlayer& player, YM2151State* state) {
   for (int ch = 0; ch < SPCPlayer::kVoices; ch++) {
     const SPCPlayer::VoiceState& v = voices[ch];
     state->updateSPCVoice(
-        ch, v.key_on, v.kon, v.note, v.volume, v.left_volume, v.right_volume,
+        ch, v.key_on, v.kon, v.note, v.pitch_note, v.volume, v.left_volume, v.right_volume,
         v.pitch, v.envelope, v.envelope_phase, v.source_address,
         v.loop_address, v.brr_address, v.sample_end_address,
         v.waveform, v.waveform_samples);

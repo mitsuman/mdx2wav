@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -28,7 +29,8 @@ class SPCPlayer {
   struct VoiceState {
     bool key_on;
     bool kon;
-    int note;            // MIDI-style note derived from the pitch register
+    int note;            // MIDI-style note from the pitch register + sample tune
+    float pitch_note;    // continuous version of `note`
     int pitch;           // 14-bit pitch register (0x1000 = 32 kHz)
     int volume;          // 0..127, envelope and voice volume combined
     int left_volume;     // signed voice volume (-128..127)
@@ -100,6 +102,16 @@ class SPCPlayer {
   bool GenerateInput();
   void ParseId666(const uint8_t* data, size_t size);
   void ApplyFadeout(int16_t* out, int frames);
+
+  // The absolute note of a BRR sample is not stored in the SPC file: the pitch
+  // register only gives the playback rate.  So each sample is decoded once and
+  // its own note at 32 kHz (the "tune") is measured from the BRR data.  From
+  // then on every note is computed from the pitch register with that fixed,
+  // per-sample offset, which makes pitch slides exact.
+  void ClearSampleTunes();
+  bool GetSampleTune(const uint8_t* ram, int dir, int srcn, float* tune) const;
+
+  mutable std::map<int, float> sample_tunes_;  // srcn -> note at 32 kHz
 
   SNES_SPC* spc_;
   SPC_Filter* filter_;

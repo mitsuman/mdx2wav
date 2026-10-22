@@ -25,21 +25,40 @@ std::string ReadTag(const uint8_t* data, size_t size, size_t offset, size_t len)
   return std::string((const char*)data + offset, end);
 }
 
-int FreqToNote(double freq) {
-  if (freq <= 0.0) return 0;
-  double note = 69.0 + 12.0 * log(freq / 440.0) / log(2.0);
-  if (note < 0.0) note = 0.0;
-  if (note > 127.0) note = 127.0;
-  return (int)(note + 0.5);
+// In-place iterative radix-2 FFT, used for the pitch estimate below.
+void FFT(float* re, float* im, int n) {
+  const double kPi = 3.14159265358979323846;
+  for (int i = 1, j = 0; i < n; i++) {
+    int bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      std::swap(re[i], re[j]);
+      std::swap(im[i], im[j]);
+    }
+  }
+  for (int len = 2; len <= n; len <<= 1) {
+    const double ang = -2.0 * kPi / len;
+    const double wr = cos(ang), wi = sin(ang);
+    for (int i = 0; i < n; i += len) {
+      double cr = 1.0, ci = 0.0;
+      for (int j = 0; j < len / 2; j++) {
+        const float ur = re[i + j], ui = im[i + j];
+        const float xr = re[i + j + len / 2], xi = im[i + j + len / 2];
+        const double vr = xr * cr - xi * ci;
+        const double vi = xr * ci + xi * cr;
+        re[i + j] = (float)(ur + vr);
+        im[i + j] = (float)(ui + vi);
+        re[i + j + len / 2] = (float)(ur - vr);
+        im[i + j + len / 2] = (float)(ui - vi);
+        const double ncr = cr * wr - ci * wi;
+        ci = cr * wi + ci * wr;
+        cr = ncr;
+      }
+    }
+  }
 }
 
-int PitchToNote(int pitch) {
-  return FreqToNote(32000.0 * (double)pitch / 4096.0);
-}
-
-// Estimate the note of the actual per-voice output.  The captured samples are
-// already at the final playback rate, so the autocorrelation period maps
-// directly to frequency.  Returns 0 for noise/unpitched voices.
 // Walk the BRR block chain to find the end of the sample/loop.  Only the
 // header is needed, so this is much cheaper than decoding the samples.
 int FindBRREnd(const uint8_t* ram, int start) {
@@ -52,49 +71,130 @@ int FindBRREnd(const uint8_t* ram, int start) {
   return addr;
 }
 
-int OutputWaveformToNote(const int16_t* wave, int samples) {
-  if (!wave || samples < 16) return 0;
+// Measure the note a BRR sample plays at 32 kHz.  The SPC file does not store
+// this value, so it is estimated once from the decoded sample: every candidate
+// fundamental is scored by how much energy its first eight harmonics carry.
+// The comb (rather than a plain FFT peak) avoids octave errors on samples whose
+// second or third harmonic is louder than the fundamental.  Returns 0 for
+// silence and unpitched material such as drums or noise.
+float EstimateSampleTune(const int16_t* samples, int count) {
+  if (!samples || count < 64) return 0.0f;
+  const double kPi = 3.14159265358979323846;
+  const int n = 4096;
+  const int fft_n = n;
 
-  double mean = 0.0;
-  for (int i = 0; i < samples; i++) mean += wave[i];
-  mean /= samples;
+  double mean = 0.0, energy = 0.0;
+  for (int i = 0; i < count; i++) {
+    mean += samples[i];
+    energy += (double)samples[i] * samples[i];
+  }
+  if (energy < 1e6) return 0.0f;
+  mean /= count;
 
-  const int max_lag = samples / 2;
-  if (max_lag < 8) return 0;
-  double norms[513] = {0.0};
-  if (max_lag > 512) return 0;
+  std::vector<float> re(fft_n, 0.0f), im(fft_n, 0.0f);
+  for (int i = 0; i < n; i++) {
+    const double w = 0.5 - 0.5 * cos(2.0 * kPi * i / (n - 1));
+    re[i] = (float)((samples[i % count] - mean) * w);
+  }
+  FFT(re.data(), im.data(), fft_n);
 
-  // Start at lag 8: near-DC and very high harmonics otherwise dominate the
-  // autocorrelation of bass notes.  This still covers notes down to ~250 Hz
-  // comfortably, and the longer 1024-sample window reaches the low bass.
-  double best = 0.0;
-  for (int lag = 8; lag <= max_lag; lag++) {
-    double corr = 0.0, ea = 0.0, eb = 0.0;
-    for (int i = 0; i + lag < samples; i++) {
-      const double a = wave[i] - mean;
-      const double b = wave[i + lag] - mean;
-      corr += a * b;
-      ea += a * a;
-      eb += b * b;
+  const int half = fft_n / 2;
+  std::vector<float> mag(half + 1, 0.0f);
+  for (int k = 0; k <= half; k++) mag[k] = sqrtf(re[k] * re[k] + im[k] * im[k]);
+
+  const double bin_hz = 32000.0 / fft_n;
+  double best_score = 0.0;
+  double best_freq = 0.0;
+  for (double f = 30.0; f <= 1200.0; f += 0.5) {
+    double score = 0.0;
+    for (int h = 1; h <= 8; h++) {
+      const double fh = f * h;
+      if (fh > 15000.0) break;
+      const int k = (int)(fh / bin_hz + 0.5);
+      double m = 0.0;
+      for (int d = -1; d <= 1; d++) {
+        const int idx = k + d;
+        if (idx >= 1 && idx <= half) m = std::max(m, (double)mag[idx]);
+      }
+      score += m / h;
     }
-    if (ea > 1e-9 && eb > 1e-9) {
-      norms[lag] = corr / sqrt(ea * eb);
-      if (norms[lag] > best) best = norms[lag];
+    if (score > best_score) {
+      best_score = score;
+      best_freq = f;
     }
   }
+  if (best_freq <= 0.0) return 0.0f;
 
-  if (best < 0.5) return 0;
-  const double threshold = best * 0.85;
-  int best_lag = 0;
-  for (int lag = 9; lag < max_lag; lag++) {
-    if (norms[lag] >= threshold && norms[lag] >= norms[lag - 1] &&
-        norms[lag] >= norms[lag + 1]) {
-      best_lag = lag;
-      break;
-    }
+  // Reject material without a period: at a harmonic peak, a tonal sample
+  // correlates strongly with itself one period later.
+  const int lag = (int)(32000.0 / best_freq + 0.5);
+  if (lag < 4 || lag >= n / 2) return 0.0f;
+  double corr = 0.0, ea = 0.0, eb = 0.0;
+  for (int i = 0; i + lag < n; i++) {
+    const double a = samples[i % count] - mean;
+    const double b = samples[(i + lag) % count] - mean;
+    corr += a * b;
+    ea += a * a;
+    eb += b * b;
   }
-  if (best_lag <= 0) return 0;
-  return FreqToNote(32000.0 / (double)best_lag);
+  if (ea <= 0.0 || eb <= 0.0) return 0.0f;
+  const double norm = corr / sqrt(ea * eb);
+  if (norm < 0.30) return 0.0f;
+
+  const double note = 69.0 + 12.0 * log(best_freq / 440.0) / log(2.0);
+  return (float)note;
+}
+
+// Decode one BRR sample and return the note it plays at 32 kHz.  The value is
+// a fixed property of the sample, so it only has to be found once per SRCN;
+// voices then get their note from the pitch register alone.
+float SampleTuneFromBRR(const uint8_t* ram, int dir, int srcn) {
+  const int entry = (dir + srcn * 4) & 0xFFFF;
+  const int start = ram[entry] | (ram[(entry + 1) & 0xFFFF] << 8);
+  const int loop = ram[(entry + 2) & 0xFFFF] | (ram[(entry + 3) & 0xFFFF] << 8);
+  int addr = loop ? loop : start;
+  if (!addr) return 0.0f;
+
+  std::vector<int16_t> decoded;
+  decoded.reserve(4096);
+  int p1 = 0, p2 = 0;
+  bool ended = false;
+  for (int block = 0; block < 512 && !ended; block++) {
+    const int header = ram[addr];
+    const int shift = header >> 4;
+    const int filter = header & 0x0C;
+    for (int i = 0; i < 16; i++) {
+      const int byte = ram[(addr + 1 + i / 2) & 0xFFFF];
+      const int nibble = (i & 1) ? (byte & 0x0F) : (byte >> 4);
+      int sample = ((int8_t)(nibble << 4)) >> 4;
+      sample = (sample << shift) >> 1;
+      const int pp1 = p1, pp2 = p2 >> 1;
+      if (filter >= 8) {
+        sample += pp1 - pp2;
+        if (filter == 8) {
+          sample += pp2 >> 4;
+          sample += (pp1 * -3) >> 6;
+        } else {
+          sample += (pp1 * -13) >> 7;
+          sample += (pp2 * 3) >> 4;
+        }
+      } else if (filter) {
+        sample += pp1 >> 1;
+        sample += (-pp1) >> 5;
+      }
+      if (sample > 32767) sample = 32767;
+      if (sample < -32768) sample = -32768;
+      sample *= 2;
+      p2 = p1;
+      p1 = sample;
+      decoded.push_back((int16_t)sample);
+    }
+    addr = (addr + 9) & 0xFFFF;
+    if (header & 0x01) ended = true;  // end flag
+    if (decoded.size() >= 4096) break;
+  }
+  if (decoded.size() < 64) return 0.0f;
+  return EstimateSampleTune(decoded.data(), (int)decoded.size());
 }
 
 }  // namespace
@@ -189,6 +289,7 @@ bool SPCPlayer::Load(const uint8_t* data, size_t size, std::string* error) {
   spc_->clear_echo();
   filter_->clear();
   resampler_.Reset();
+  ClearSampleTunes();
   ParseId666(data, size);
 
   loaded_ = true;
@@ -293,6 +394,26 @@ int SPCPlayer::Generate(int16_t* out, int frames) {
   return frames;
 }
 
+void SPCPlayer::ClearSampleTunes() {
+  sample_tunes_.clear();
+}
+
+bool SPCPlayer::GetSampleTune(const uint8_t* ram, int dir, int srcn,
+                              float* tune) const {
+  if (!tune || !ram) return false;
+  auto it = sample_tunes_.find(srcn);
+  if (it != sample_tunes_.end()) {
+    if (it->second < 0.0f) return false;  // known to be unpitched
+    *tune = it->second;
+    return true;
+  }
+  const float note = SampleTuneFromBRR(ram, dir, srcn);
+  sample_tunes_[srcn] = note > 0.0f ? note : -1.0f;
+  if (note <= 0.0f) return false;
+  *tune = note;
+  return true;
+}
+
 void SPCPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
   if (!out) return;
   memset(out, 0, sizeof(VoiceState) * kVoices);
@@ -318,7 +439,7 @@ void SPCPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
     s.key_on = env > 0;
     s.kon = (kon & (1 << i)) != 0;
     s.pitch = pitch;
-    s.note = PitchToNote(pitch);
+    s.note = 0;  // filled in below from the pitch register + sample tuning
     s.volume = std::min(127, (env * max_vol) / 2047);
     s.left_volume = voll;
     s.right_volume = volr;
@@ -355,7 +476,18 @@ void SPCPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
         s.waveform[j] = ring[(pos - count + j + ring_size) & (ring_size - 1)];
       }
       s.waveform_samples = count;
-      s.note = OutputWaveformToNote(s.waveform, count);
+
+      // The note follows the pitch register.  Only the sample's own tuning is
+      // measured (once, from its BRR data) so that the register value can be
+      // turned into an absolute note; pitch slides then track exactly.
+      float tune = 0.0f;
+      if (pitch > 0 && GetSampleTune(ram, dir, srcn, &tune)) {
+        float n = tune + 12.0f * (float)log2((double)pitch / 4096.0);
+        if (n < 0.0f) n = 0.0f;
+        if (n > 127.0f) n = 127.0f;
+        s.pitch_note = n;
+        s.note = (int)(n + 0.5f);
+      }
     } else {
       s.source_address = 0;
       s.loop_address = 0;
@@ -363,6 +495,7 @@ void SPCPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
       s.sample_end_address = 0;
       s.waveform_samples = 0;
       s.note = 0;
+      s.pitch_note = 0.0f;
     }
   }
 }

@@ -93,6 +93,7 @@ public:
         // the YM2151 fields above are filled with derived values so that the
         // keyboard and waveform drawing code can be shared.
         uint16_t spc_pitch;        // 14-bit pitch register
+        float    spc_pitch_note;   // continuous MIDI note (pitch register + tune)
         uint16_t spc_envelope;     // 0-0x7FF
         uint16_t spc_source;       // DIR sample start address
         uint16_t spc_loop;         // DIR sample loop address
@@ -171,8 +172,8 @@ public:
     // SPC visualization support
     void setSPCMode(bool enabled);
     bool isSPCMode() const { return spc_mode_; }
-    void updateSPCVoice(int ch, bool key_on, bool kon, int note, int volume,
-                        int left_volume, int right_volume, int pitch,
+    void updateSPCVoice(int ch, bool key_on, bool kon, int note, float pitch_note,
+                        int volume, int left_volume, int right_volume, int pitch,
                         int envelope, int envelope_phase, int source_address,
                         int loop_address, int brr_address, int sample_end_address,
                         const int16_t* waveform, int waveform_samples);
