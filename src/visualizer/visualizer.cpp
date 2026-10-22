@@ -104,6 +104,8 @@ Visualizer::Visualizer()
     , elapsed_time_(0.0)
     , file_list_(nullptr)
     , file_titles_(nullptr)
+    , file_dirs_(nullptr)
+    , dir_change_requested_(false)
     , file_list_count_(0)
     , current_file_index_(0)
     , psf_mode_(false)
@@ -577,11 +579,31 @@ void Visualizer::update() {
                     ensureFilerSelectionVisible();
                 } else if ((sym == SDLK_RETURN || sym == SDLK_KP_ENTER) &&
                            file_list_count_ > 0) {
-                    // 選択した曲を再生する（実際のロードは main 側で行う）
-                    requested_file_index_ = filer_selection_;
-                    file_change_requested_ = true;
-                    filer_mode_ = false;
-                    return;
+                    if (file_dirs_ && file_dirs_[filer_selection_]) {
+                        // A directory: descend into it.
+                        requested_directory_ = file_list_[filer_selection_];
+                        dir_change_requested_ = true;
+                    } else {
+                        // 選択した曲を再生する（実際のロードは main 側で行う）
+                        requested_file_index_ = filer_selection_;
+                        file_change_requested_ = true;
+                        filer_mode_ = false;
+                        return;
+                    }
+                } else if (sym == SDLK_LEFT) {
+                    // Go up one directory.
+                    std::string dir = filer_directory_;
+                    while (dir.size() > 1 && dir.back() == '/') dir.pop_back();
+                    const size_t slash = dir.find_last_of('/');
+                    std::string parent = "/";
+                    if (slash != std::string::npos) {
+                        parent = dir.substr(0, slash);
+                        if (parent.empty()) parent = "/";
+                    }
+                    if (parent != filer_directory_) {
+                        requested_directory_ = parent;
+                        dir_change_requested_ = true;
+                    }
                 } else if (sym == SDLK_ESCAPE || sym == SDLK_f) {
                     filer_mode_ = false;
                 }
@@ -620,14 +642,13 @@ void Visualizer::update() {
                 return;
             } else if (event.key.keysym.sym == SDLK_LEFT && file_list_count_ > 0) {
                 // 前のファイルへ（リストの先頭からは末尾へ回り込む）
-                int new_index = current_file_index_ - 1;
-                if (new_index < 0) new_index = file_list_count_ - 1;
+                int new_index = stepFileIndex(current_file_index_, -1);
                 requested_file_index_ = new_index;
                 file_change_requested_ = true;
                 return;
             } else if (event.key.keysym.sym == SDLK_RIGHT && file_list_count_ > 0) {
                 // 次のファイルへ（末尾からは先頭へ回り込む）
-                int new_index = (current_file_index_ + 1) % file_list_count_;
+                int new_index = stepFileIndex(current_file_index_, +1);
                 requested_file_index_ = new_index;
                 file_change_requested_ = true;
                 return;
@@ -1030,14 +1051,30 @@ void Visualizer::setFilename(const char* filename) {
     }
 }
 
-void Visualizer::setFileList(const char** files, const char** titles, int count,
-                             int current_index) {
+void Visualizer::setFileList(const char** files, const char** titles,
+                             const uint8_t* dirs, int count, int current_index) {
     file_list_ = files;
     file_titles_ = titles;
+    file_dirs_ = dirs;
     file_list_count_ = count;
     current_file_index_ = current_index;
     filer_selection_ = current_index;
+    filer_scroll_ = 0;
     file_change_requested_ = false;
+}
+
+void Visualizer::setDirectory(const char* path) {
+    filer_directory_ = path ? path : "";
+}
+
+int Visualizer::stepFileIndex(int from, int step) const {
+    if (file_list_count_ <= 0) return from;
+    int idx = from;
+    for (int n = 0; n < file_list_count_; n++) {
+        idx = (idx + step + file_list_count_) % file_list_count_;
+        if (!file_dirs_ || !file_dirs_[idx]) return idx;
+    }
+    return from;
 }
 
 void Visualizer::setCurrentFileIndex(int index) {
@@ -1961,7 +1998,7 @@ void Visualizer::ensureFilerSelectionVisible() {
 
 // ファイル一覧（フィルタモード）。F キーで開閉し、↑↓で選択、Enterで再生。
 void Visualizer::renderFiler() {
-    if (!filer_mode_ || !file_list_ || file_list_count_ <= 0) return;
+    if (!filer_mode_) return;
 
     TTF_Font* font_title = (TTF_Font*)(font_medium_ ? font_medium_ : font_small_);
     TTF_Font* font_row = (TTF_Font*)(font_small_ ? font_small_ : font_medium_);
@@ -1986,12 +2023,15 @@ void Visualizer::renderFiler() {
     SDL_RenderDrawRect(renderer_, &panel);
 
     // ヘッダ
-    char header[128];
-    snprintf(header, sizeof(header), "FILE LIST   %d files", file_list_count_);
+    char header[512];
+    snprintf(header, sizeof(header), "FILE LIST   %s   (%d)",
+             filer_directory_.empty() ? "." : filer_directory_.c_str(),
+             file_list_count_);
     renderText(renderer_, font_title, header, panel_x + 20, panel_y + 10,
                200, 220, 255);
-    renderText(renderer_, font_small_, "UP/DOWN: select   ENTER: play   F/ESC: close",
-               panel_x + panel_w - 430, panel_y + 14, 130, 150, 200);
+    renderText(renderer_, font_small_,
+               "UP/DOWN: select   ENTER: open/play   LEFT: parent   F/ESC: close",
+               panel_x + panel_w - 500, panel_y + 14, 130, 150, 200);
 
     const int row_h = 22;
     const int rows = filerRowCount();
@@ -1999,6 +2039,11 @@ void Visualizer::renderFiler() {
     const int name_x = panel_x + 24;
     const int title_x = panel_x + (int)(panel_w * 0.55);
     const int title_max_w = panel_x + panel_w - title_x - 20;
+
+    if (file_list_count_ == 0) {
+        renderText(renderer_, font_row, "(no music files)", panel_x + 24,
+                   list_y, 120, 130, 160);
+    }
 
     for (int i = 0; i < rows; i++) {
         const int idx = filer_scroll_ + i;
@@ -2014,12 +2059,13 @@ void Visualizer::renderFiler() {
             SDL_RenderDrawRect(renderer_, &hi);
         }
 
+        const bool is_dir = file_dirs_ && file_dirs_[idx] != 0;
         char line[512];
-        snprintf(line, sizeof(line), "%s%s", selected ? "> " : "  ",
-                 pathBaseName(file_list_[idx]).c_str());
-        const Uint8 r = selected ? 240 : 170;
-        const Uint8 g = selected ? 245 : 185;
-        const Uint8 b = selected ? 255 : 210;
+        snprintf(line, sizeof(line), "%s%s%s", selected ? "> " : "  ",
+                 pathBaseName(file_list_[idx]).c_str(), is_dir ? "/" : "");
+        const Uint8 r = selected ? 240 : (is_dir ? 120 : 170);
+        const Uint8 g = selected ? 245 : (is_dir ? 220 : 185);
+        const Uint8 b = selected ? 255 : (is_dir ? 255 : 210);
         // 長いファイル名は曲名の列に食い込まないよう末尾を省略する
         int name_w = 0, name_h = 0;
         const int name_max_w = title_x - name_x - 24;
@@ -2039,7 +2085,11 @@ void Visualizer::renderFiler() {
             renderText(renderer_, font_row, line, name_x, y, r, g, b);
         }
 
-        if (file_titles_ && file_titles_[idx] && file_titles_[idx][0]) {
+        if (is_dir) {
+            renderText(renderer_, font_row, "<DIR>", title_x, y,
+                       selected ? 180 : (Uint8)120, selected ? 220 : (Uint8)200,
+                       selected ? 255 : (Uint8)255);
+        } else if (file_titles_ && file_titles_[idx] && file_titles_[idx][0]) {
             const std::string title = sjisToUtf8(file_titles_[idx]);
             int tw = 0, th = 0;
             if (TTF_SizeUTF8(font_row, title.c_str(), &tw, &th) == 0 &&
@@ -2067,7 +2117,13 @@ void Visualizer::renderFiler() {
 
     // フッター: 選択中の曲名
     const int footer_y = panel_y + panel_h - 26;
-    if (file_titles_ && file_titles_[filer_selection_] &&
+    if (file_list_count_ <= 0) {
+        // nothing to show
+    } else if (file_dirs_ && file_dirs_[filer_selection_]) {
+        renderText(renderer_, font_title,
+                   pathBaseName(file_list_[filer_selection_]).c_str(),
+                   panel_x + 20, footer_y, 140, 200, 255);
+    } else if (file_titles_ && file_titles_[filer_selection_] &&
         file_titles_[filer_selection_][0]) {
         const std::string title = sjisToUtf8(file_titles_[filer_selection_]);
         renderText(renderer_, font_title, title.c_str(), panel_x + 20, footer_y,

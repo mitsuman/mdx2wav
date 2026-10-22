@@ -305,63 +305,65 @@ std::string readMusicTitle(const std::string& path) {
   return title;
 }
 
-// ディレクトリ内のMDX/SPCファイルを列挙
-std::vector<std::string> listMusicFiles(const char* filepath) {
-  std::vector<std::string> files;
+struct MusicEntry {
+  std::string path;
+  bool is_dir;
+};
 
-  // まず、パスがディレクトリかファイルかを確認
+// Directory of a file (or the path itself when it is a directory).
+std::string musicDirectory(const char* filepath) {
   struct stat path_stat;
-  if (stat(filepath, &path_stat) != 0) {
-    return files;
-  }
+  if (stat(filepath, &path_stat) != 0) return std::string();
+  if (S_ISDIR(path_stat.st_mode)) return std::string(filepath);
+  std::string path(filepath);
+  const size_t last_slash = path.find_last_of('/');
+  return (last_slash != std::string::npos) ? path.substr(0, last_slash) : ".";
+}
 
-  std::string dir_path;
-  bool is_directory = S_ISDIR(path_stat.st_mode);
+bool hasMusicExtension(const char* name) {
+  const size_t len = strlen(name);
+  if (len > 4 && strcasecmp(name + len - 4, ".mdx") == 0) return true;
+  if (len > 4 && strcasecmp(name + len - 4, ".spc") == 0) return true;
+  if (len > 4 && strcasecmp(name + len - 4, ".psf") == 0) return true;
+  if (len > 8 && strcasecmp(name + len - 8, ".minipsf") == 0) return true;
+  return false;
+}
 
-  if (is_directory) {
-    // ディレクトリが直接指定された場合
-    dir_path = filepath;
-  } else {
-    // ファイルが指定された場合、そのディレクトリを取得
-    std::string path(filepath);
-    size_t last_slash = path.find_last_of('/');
-    dir_path = (last_slash != std::string::npos) ? path.substr(0, last_slash) : ".";
-  }
-
+// Files (and subdirectories) in a directory, sorted by path.
+std::vector<MusicEntry> listMusicEntries(const std::string& dir_path) {
+  std::vector<MusicEntry> entries;
   DIR* dir = opendir(dir_path.c_str());
-  if (!dir) {
-    return files;
-  }
+  if (!dir) return entries;
 
   struct dirent* entry;
   while ((entry = readdir(dir)) != nullptr) {
-    if (entry->d_type == DT_REG) {
-      const char* name = entry->d_name;
-      size_t len = strlen(name);
+    const char* name = entry->d_name;
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
 
-      // .mdx / .spc (case insensitive) を追加
-      if ((len > 4 &&
-           ((name[len-4] == '.' && name[len-3] == 'm' && name[len-2] == 'd' && name[len-1] == 'x') ||
-            (name[len-4] == '.' && name[len-3] == 'M' && name[len-2] == 'D' && name[len-1] == 'X'))) ||
-          (len > 4 &&
-           ((name[len-4] == '.' && name[len-3] == 's' && name[len-2] == 'p' && name[len-1] == 'c') ||
-            (name[len-4] == '.' && name[len-3] == 'S' && name[len-2] == 'P' && name[len-1] == 'C'))) ||
-          (len > 4 && name[len-4] == '.' &&
-           strcasecmp(name + len - 4, ".psf") == 0) ||
-          (len > 8 &&
-           strcasecmp(name + len - 8, ".minipsf") == 0)) {
-        std::string fullpath = dir_path + "/" + name;
-        files.push_back(fullpath);
-      }
+    const std::string full = dir_path + "/" + name;
+    struct stat st;
+    if (stat(full.c_str(), &st) != 0) continue;
+
+    if (S_ISDIR(st.st_mode)) {
+      MusicEntry e;
+      e.path = full;
+      e.is_dir = true;
+      entries.push_back(e);
+    } else if (S_ISREG(st.st_mode) && hasMusicExtension(name)) {
+      MusicEntry e;
+      e.path = full;
+      e.is_dir = false;
+      entries.push_back(e);
     }
   }
-
   closedir(dir);
 
-  // ソート
-  std::sort(files.begin(), files.end());
-
-  return files;
+  std::sort(entries.begin(), entries.end(),
+            [](const MusicEntry& a, const MusicEntry& b) {
+              if (a.is_dir != b.is_dir) return a.is_dir > b.is_dir;  // dirs first
+              return a.path < b.path;
+            });
+  return entries;
 }
 
 bool LoadMDX(const char *mdx_name, char *title, int title_len, unsigned int *out_pdx_size = nullptr) {
@@ -625,13 +627,19 @@ int main(int argc, char **argv) {
   if (!enable_visualizer) {
     struct stat path_stat;
     if (stat(mdx_name, &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) {
-      std::vector<std::string> file_list = listMusicFiles(mdx_name);
-      if (!file_list.empty()) {
-        selected_file = file_list[0];
+      std::vector<MusicEntry> entries = listMusicEntries(mdx_name);
+      bool found = false;
+      for (const auto& e : entries) {
+        if (e.is_dir) continue;
+        selected_file = e.path;
         mdx_name = selected_file.c_str();
+        found = true;
+        break;
+      }
+      if (found) {
         fprintf(stderr, "Directory specified. Playing first file: %s\n", mdx_name);
       } else {
-        fprintf(stderr, "No MDX/SPC files found in directory: %s\n", mdx_name);
+        fprintf(stderr, "No MDX/SPC/PSF files found in directory: %s\n", mdx_name);
         return -1;
       }
     }
@@ -658,39 +666,68 @@ int main(int argc, char **argv) {
   // ファイルリストを準備（ビジュアライザー用）
   std::vector<std::string> file_list;
   std::vector<std::string> file_titles;
+  std::vector<uint8_t> file_dirs;
   std::vector<const char*> file_ptrs;
   std::vector<const char*> title_ptrs;
+  std::string music_dir;
   int current_file_index = 0;
 
+  auto rebuildFileList = [&](const std::string& dir) {
+    music_dir = dir;
+    file_list.clear();
+    file_titles.clear();
+    file_dirs.clear();
+    file_ptrs.clear();
+    title_ptrs.clear();
+    std::vector<MusicEntry> entries = listMusicEntries(dir);
+    for (const auto& e : entries) {
+      file_list.push_back(e.path);
+      file_titles.push_back(e.is_dir ? std::string() : readMusicTitle(e.path));
+      file_dirs.push_back(e.is_dir ? 1 : 0);
+    }
+    for (const auto& f : file_list) file_ptrs.push_back(f.c_str());
+    for (const auto& t : file_titles) title_ptrs.push_back(t.c_str());
+  };
+
   if (enable_visualizer) {
-    // ディレクトリ内のMDXファイルを列挙
-    file_list = listMusicFiles(mdx_name);
+    // Absolute path so the filer's parent-directory navigation is stable.
+    rebuildFileList(canonicalPath(musicDirectory(mdx_name)));
 
     // ディレクトリが指定された場合、最初のファイルを再生
     struct stat path_stat;
     if (stat(mdx_name, &path_stat) == 0 && S_ISDIR(path_stat.st_mode)) {
-      if (!file_list.empty()) {
-        mdx_name = file_list[0].c_str();
-        current_file_index = 0;
-        fprintf(stderr, "Directory specified. Playing first file: %s\n", mdx_name);
-      } else {
-        fprintf(stderr, "No MDX/SPC files found in directory: %s\n", mdx_name);
+      bool found = false;
+      for (size_t i = 0; i < file_list.size(); i++) {
+        if (!file_dirs[i]) {
+          mdx_name = file_list[i].c_str();
+          current_file_index = (int)i;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        fprintf(stderr, "No MDX/SPC/PSF files found in directory: %s\n", mdx_name);
         return -1;
       }
+      fprintf(stderr, "Directory specified. Playing first file: %s\n", mdx_name);
     } else if (!file_list.empty()) {
       // 現在のファイルのインデックスを見つける。  カレントディレクトリから
       // 再生した場合は "./name" と "name" のように表記が揺れるため、実パス
       // で比較する（見つからなければファイル名だけで比較する）。
       const std::string current_file = canonicalPath(mdx_name);
+      bool found = false;
       for (size_t i = 0; i < file_list.size(); i++) {
+        if (file_dirs[i]) continue;
         if (canonicalPath(file_list[i]) == current_file) {
           current_file_index = (int)i;
+          found = true;
           break;
         }
       }
-      if (current_file_index == 0 && canonicalPath(file_list[0]) != current_file) {
+      if (!found) {
         const std::string base = baseName(mdx_name);
         for (size_t i = 0; i < file_list.size(); i++) {
+          if (file_dirs[i]) continue;
           if (baseName(file_list[i]) == base) {
             current_file_index = (int)i;
             break;
@@ -698,7 +735,6 @@ int main(int argc, char **argv) {
         }
       }
     }
-
     is_spc = is_spc_path(mdx_name);
     is_psf = !is_spc && is_psf_path(mdx_name);
 
@@ -773,18 +809,11 @@ int main(int argc, char **argv) {
     // ファイルリストを設定。  ファイル名だけだと選びにくいので、ヘッダから
     // 読んだ曲名も一緒に渡す（フィルタモードで表示する）。
     if (!file_list.empty()) {
-      file_titles.clear();
-      title_ptrs.clear();
-      for (const auto& f : file_list) {
-        file_ptrs.push_back(f.c_str());
-        file_titles.push_back(readMusicTitle(f));
-      }
-      for (const auto& t : file_titles) {
-        title_ptrs.push_back(t.c_str());
-      }
       visualizer->setFileList(file_ptrs.data(), title_ptrs.data(),
-                              (int)file_ptrs.size(), current_file_index);
+                              file_dirs.data(), (int)file_ptrs.size(),
+                              current_file_index);
     }
+    visualizer->setDirectory(music_dir.c_str());
 
     // スクリーンショット専用モードの設定
     if (screenshot_filename) {
@@ -1135,6 +1164,17 @@ reload_file:
           // 現在の曲を頭から再生
           fprintf(stderr, "\nRestarting song: %s\n", mdx_name);
           goto reload_file;
+        }
+
+        // フィルタでディレクトリ移動が要求されたら一覧を作り直す
+        if (visualizer->hasDirectoryChangeRequest()) {
+          const std::string dir = visualizer->getRequestedDirectory();
+          visualizer->clearDirectoryChangeRequest();
+          rebuildFileList(dir);
+          visualizer->setFileList(file_ptrs.data(), title_ptrs.data(),
+                                  file_dirs.data(), (int)file_ptrs.size(), 0);
+          visualizer->setDirectory(music_dir.c_str());
+          current_file_index = 0;
         }
 
         // ファイル切り替え要求をチェック

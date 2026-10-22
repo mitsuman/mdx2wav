@@ -3,7 +3,10 @@
 
 #include "ym2151_state.h"
 #include "spectrum_analyzer.h"
+#include <stdint.h>
+
 #include <cstdio>
+#include <string>
 
 // 前方宣言
 struct SDL_Window;
@@ -107,11 +110,18 @@ public:
     void setSongTitle(const char* title);
     void setFilename(const char* filename);
     
-    // ファイルリストの設定（titles は files と同じ要素数。無くてもよい）
-    void setFileList(const char** files, const char** titles, int count,
-                     int current_index);
+    // ファイルリストの設定（titles / dirs は files と同じ要素数。無くてもよい）
+    void setFileList(const char** files, const char** titles,
+                     const uint8_t* dirs, int count, int current_index);
+
+    // Directory currently shown by the filer.
+    void setDirectory(const char* path);
+    bool hasDirectoryChangeRequest() const { return dir_change_requested_; }
+    const std::string& getRequestedDirectory() const { return requested_directory_; }
+    void clearDirectoryChangeRequest() { dir_change_requested_ = false; }
     // 曲送り後などに、リスト内の現在位置だけを更新する
     void setCurrentFileIndex(int index);
+    int stepFileIndex(int from, int step) const;
     
     // ファイル切り替え要求があるか確認
     bool hasFileChangeRequest() const { return file_change_requested_; }
@@ -275,6 +285,10 @@ private:
     bool psf_reverb_;
     const char** file_list_;
     const char** file_titles_;   // may be nullptr
+    const uint8_t* file_dirs_;   // may be nullptr
+    std::string filer_directory_;
+    bool dir_change_requested_;
+    std::string requested_directory_;
     int file_list_count_;
     int current_file_index_;
     bool filer_mode_;
