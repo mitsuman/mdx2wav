@@ -1,3 +1,4 @@
+#include <stdio.h>
 #define MXDRVG_EXPORT
 #define MXDRVG_CALLBACK
 
@@ -23,7 +24,7 @@ X68K::X68PCM8* MXDRVG_GetPCM8(void) {
 
 void MXDRVG_SetPCM8(X68K::X68PCM8* pcm8) {
 	if (pcm8) {
-        printf("MXDRVG_SetPCM8: Setting new PCM8 instance %p\n", pcm8);
+        fprintf(stderr, "MXDRVG_SetPCM8: Setting new PCM8 instance %p\n", pcm8);
 		PCM8 = pcm8;
 	}
 }

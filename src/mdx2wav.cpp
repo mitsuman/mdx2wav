@@ -551,6 +551,68 @@ bool LoadMDX(const char *mdx_name, char *title, int title_len, unsigned int *out
   return true;
 }
 
+#ifdef ENABLE_VISUALIZER
+// Run the MDX once without drawing anything to find out which FM/ADPCM
+// channels the song actually uses, so the window (and the recorded video) can
+// be sized to fit instead of always showing all eight channels.
+static void DetectMDXChannels(const char* path, int sample_rate, int filter_mode,
+                              int mdx_buf_size, int pdx_buf_size, int* fm_used,
+                              int* adpcm_used) {
+  *fm_used = 0;
+  *adpcm_used = 0;
+
+  YM2151State state;
+  OPM_Delegate* original = MXDRVG_GetOPMDelegate();
+  X68K::X68PCM8* original_pcm8 = MXDRVG_GetPCM8();
+  OPMVisualizer* opm = original ? new OPMVisualizer(original, &state) : nullptr;
+  if (opm) MXDRVG_SetOPMDelegate(opm);
+  PCM8Visualizer* pcm8 = new PCM8Visualizer(&state);
+  MXDRVG_SetPCM8(pcm8);
+
+  // Mirror the main loop's restart sequence: Start, End, Start, then data.
+  MXDRVG_Start(sample_rate, filter_mode, mdx_buf_size, pdx_buf_size);
+  MXDRVG_End();
+  MXDRVG_Start(sample_rate, filter_mode, mdx_buf_size, pdx_buf_size);
+  MXDRVG_TotalVolume(256);
+
+  char title[256];
+  unsigned int pdx_size = 0;
+  long long done = 0;
+  if (LoadMDX(path, title, sizeof(title), &pdx_size)) {
+    std::vector<short> buf(1024 * 2);
+    const long long max_samples = (long long)sample_rate * 300;  // 5 min cap
+    while (!MXDRVG_GetTerminated() && done < max_samples) {
+      const int n = MXDRVG_GetPCM(buf.data(), 1024);
+      if (n <= 0) break;
+      done += n;
+
+      YM2151State::Channel channels[8];
+      state.getAllChannels(channels);
+      for (int ch = 0; ch < 8; ch++) {
+        if ((channels[ch].key_on || channels[ch].register_writes > 0) &&
+            ch + 1 > *fm_used) {
+          *fm_used = ch + 1;
+        }
+      }
+      YM2151State::ADPCMChannel adpcm[8];
+      state.getAllADPCMChannels(adpcm);
+      for (int ch = 0; ch < 8; ch++) {
+        if ((adpcm[ch].key_on || adpcm[ch].initial_address != 0 ||
+             adpcm[ch].length > 0) && ch + 1 > *adpcm_used) {
+          *adpcm_used = ch + 1;
+        }
+      }
+      if (*fm_used >= 8 && *adpcm_used >= 8) break;  // nothing left to find
+    }
+  }
+
+  MXDRVG_SetOPMDelegate(original);
+  MXDRVG_SetPCM8(original_pcm8);
+  delete opm;
+  delete pcm8;
+}
+#endif
+
 void version() {
   printf(
     "mdx2wav version " VERSION "\n"
@@ -587,6 +649,8 @@ void help() {
     "  --adpcm-ch <n>      : set number of ADPCM channels to display (1-8, default:8).\n"
     "  --waveform-scale <n>: set waveform amplitude scale (0.1-10.0, default:1.0).\n"
     "  --spectrum          : show the spectrum analyzer (off by default; wider window).\n"
+    "  --no-auto-size      : keep the default window size instead of fitting it to the\n"
+    "                        channels the MDX song actually uses.\n"
 #endif
     "  -l <loop> : set loop limit. (default:2, MDX only; SPC loops are controlled by the SPC program)\n"
     "  -m        : measure play time as sec.\n"
@@ -813,6 +877,18 @@ int main(int argc, char **argv) {
     if (is_spc) {
       ym2151_channels = 8;
       adpcm_channels = 0;
+    } else if (!is_psf && !options.no_auto_size && !get_title &&
+               !measure_play_time) {
+      // Fit the window to the channels the song really uses.
+      int fm_used = 0, adpcm_used = 0;
+      DetectMDXChannels(mdx_name, SAMPLE_RATE, filter_mode, MDX_BUF_SIZE,
+                        PDX_BUF_SIZE, &fm_used, &adpcm_used);
+      if (fm_used > 0 && fm_used < ym2151_channels) ym2151_channels = fm_used;
+      if (adpcm_used < adpcm_channels) adpcm_channels = adpcm_used;
+      if (verbose) {
+        fprintf(stderr, "auto size: FM %d ch, ADPCM %d ch\n",
+                ym2151_channels, adpcm_channels);
+      }
     }
     int window_height = is_psf
         ? 844

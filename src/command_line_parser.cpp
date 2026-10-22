@@ -147,6 +147,10 @@ bool CommandLineParser::HandleLongOption(const std::string& arg, int& index, Com
     options->video_fps = fps;
     return true;
   }
+  if (name == "no-auto-size") {
+    options->no_auto_size = true;
+    return true;
+  }
   if (name == "spectrum") {
     options->enable_spectrum = true;
     options->enable_visualizer = true;
@@ -249,7 +253,7 @@ bool CommandLineParser::HandleLongOption(const std::string& arg, int& index, Com
       name == "ym2151-ch" || name == "adpcm-ch" ||
       name == "ym2151-waveform-scale" || name == "adpcm-waveform-scale" ||
       name == "waveform-scale" || name == "spectrum-debug" ||
-      name == "spectrum") {
+      name == "spectrum" || name == "no-auto-size") {
     *error_message = "Visualizer support is not enabled.";
     return false;
   }

@@ -84,6 +84,15 @@ cursor keys and played with Enter.  The list is stored in
 `~/.config/mdx2wav/history.txt` and survives restarts; re-playing a file moves
 it back to the top instead of adding a duplicate.
 
+## Automatic MDX window size
+
+Before the window is created, an MDX song is played once without drawing
+(typically well under a second per minute of music) to see which FM and ADPCM
+channels it really uses.  The window — and the recorded video — is then sized
+to those channels, so a song with one ADPCM channel is not shown with eight
+empty OKI rows.  `--no-auto-size` keeps the previous fixed sizing, and
+`--ym2151-ch` / `--adpcm-ch` still cap the counts.
+
 ## Spectrum analyzer
 
 The per-channel spectrum strip is off by default, which keeps the window at
