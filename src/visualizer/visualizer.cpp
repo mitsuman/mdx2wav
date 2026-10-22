@@ -153,6 +153,8 @@ Visualizer::Visualizer()
         keyboard_offset_hold_until_s_[i] = 0.0;
         keyboard_latched_note_[i] = 0;
         psf_latched_note_[i] = 0;
+        psf_peak_[i] = 0.0f;
+        psf_peak_time_[i] = 0.0;
     }
 
     // 前フレーム波形データの初期化
@@ -1037,7 +1039,11 @@ void Visualizer::setPSFMode(bool enabled) {
     psf_mode_ = enabled;
     if (enabled) {
         psf_voice_count_ = 24;
-        for (int i = 0; i < 24; i++) psf_latched_note_[i] = 0;
+        for (int i = 0; i < 24; i++) {
+            psf_latched_note_[i] = 0;
+            psf_peak_[i] = 0.0f;
+            psf_peak_time_[i] = 0.0;
+        }
     }
 }
 
@@ -1176,6 +1182,17 @@ void Visualizer::renderPSF() {
                 }
             }
 
+            // Peak hold: keep the highest level for a second, then let the
+            // marker fall back slowly.
+            const double now_s = SDL_GetTicks() / 1000.0;
+            if (mix_norm >= psf_peak_[v]) {
+                psf_peak_[v] = mix_norm;
+                psf_peak_time_[v] = now_s;
+            } else if (now_s - psf_peak_time_[v] > 1.0) {
+                psf_peak_[v] -= 0.02f;  // ~1.2/s at 60 fps
+                if (psf_peak_[v] < mix_norm) psf_peak_[v] = mix_norm;
+            }
+
             const int level_w = (int)(mix_norm * meter_w);
             if (level_w > 0 && f.active) {
                 SDL_Rect lb = {meter_x + 1, meter_y + 1, level_w, meter_h - 2};
@@ -1184,6 +1201,14 @@ void Visualizer::renderPSF() {
                     SDL_SetRenderDrawColor(renderer_, pr, pg, pb, 255);
                     SDL_RenderFillRect(renderer_, &lb);
                 }
+            }
+
+            if (psf_peak_[v] > 0.0f) {
+                int px = meter_x + 1 + (int)(psf_peak_[v] * (meter_w - 2));
+                if (px > meter_x + meter_w - 3) px = meter_x + meter_w - 3;
+                SDL_SetRenderDrawColor(renderer_, 255, 255, 210, 255);
+                SDL_Rect mark = {px, meter_y - 1, 2, meter_h + 2};
+                SDL_RenderFillRect(renderer_, &mark);
             }
         }
 
