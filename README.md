@@ -98,7 +98,10 @@ column (48 px rows, 1080 x 844 window).  Each row starts with a 7-segment voice
 number like the MDX/SPC panels, then PIT with VOL underneath, the note, the
 level meter and the playback position, followed by the voice's own
 eight-octave keyboard (same key width as SPC, with octave numbers under the C
-keys) and a 256 px captured-waveform panel like the SPC layout.  The envelope
+keys) and a 256 px captured-waveform panel like the SPC layout (the same 32 ms
+window: 1411 samples at 44.1 kHz).  The waveform is sniffed at the mix point,
+after the S-DSP-style envelope and voice volume, so it is the voice's actual
+contribution to the output.  The envelope
 phase (ATK/DEC/SUS/REL) is shown at the bottom-left of each row, coloured like
 the key.  Voices 16..23
 are only listed as note names in the header, in case a driver uses them.  The rest of the row is the voice's

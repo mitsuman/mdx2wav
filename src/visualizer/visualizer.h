@@ -149,7 +149,7 @@ public:
         int current_address;
         int sample_start;
         int sample_end;
-        int16_t waveform[1024];
+        int16_t waveform[1411];  // 32 ms at 44.1 kHz, same span as SPC
         int waveform_samples;
     };
     void setPSFMode(bool enabled);

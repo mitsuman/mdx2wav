@@ -1124,7 +1124,9 @@ reload_file:
             out[vi].start_address = pv[vi].start_address;
             out[vi].loop_address = pv[vi].loop_address;
             out[vi].current_address = pv[vi].current_address;
-            for (int wi = 0; wi < 1024; wi++) out[vi].waveform[wi] = pv[vi].waveform[wi];
+            for (int wi = 0; wi < PSFPlayer::kWaveformSamples; wi++) {
+              out[vi].waveform[wi] = pv[vi].waveform[wi];
+            }
             out[vi].waveform_samples = pv[vi].waveform_samples;
             out[vi].sample_start = pv[vi].sample_start;
             out[vi].sample_end = pv[vi].sample_end_address;

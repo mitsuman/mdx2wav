@@ -19,7 +19,9 @@
 class PSFPlayer {
  public:
   static const int kVoices = 24;
-  enum { kWaveformSamples = 1024 };
+  // 32 ms at 44.1 kHz, matching the SPC waveform's 1024 samples at 32 kHz, so
+  // both panels show the same amount of time.
+  enum { kWaveformSamples = 1411 };
 
   struct VoiceState {
     bool active;          // envelope is not fully released

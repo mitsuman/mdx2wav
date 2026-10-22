@@ -1756,8 +1756,12 @@ static void EMU_CALL render(struct SPUCORE_STATE *state, uint16 *ram, sint16 *bu
       sint32 q_l = (v_l * ibuf[i]) >> 16;
       sint32 q_r = (v_r * ibuf[i]) >> 16;
       {
-        // Keep the channel with the larger magnitude so panned or
-        // phase-inverted voices are still visible.
+        // Sniff the final per-voice contribution: q_l/q_r already include the
+        // BRR decode, pitch, ADSR envelope and voice volume, and these are the
+        // exact values added to the main mix just below (master volume and
+        // echo are applied to the sum, not to a voice).  Keep the channel with
+        // the larger magnitude so panned or phase-inverted voices are still
+        // visible.
         sint32 amp = q_l < 0 ? -q_l : q_l;
         sint32 ampr = q_r < 0 ? -q_r : q_r;
         if (ampr > amp) amp = q_r;
