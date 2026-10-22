@@ -50,6 +50,10 @@ void SpectrumAnalyzer::performFFT() {
     for (int bin = 0; bin < NUM_BINS; bin++) {
         float magnitude = sqrtf(fft_real_[bin] * fft_real_[bin] +
                                fft_imag_[bin] * fft_imag_[bin]);
+        // Normalize for the unnormalized FFT above.  Without this a normal
+        // full-scale SPC sample saturates every bin and the spectrum strip
+        // becomes a solid white block.
+        magnitude /= (FFT_SIZE / 2);
         magnitudes_[bin] = magnitude;
 
         // スムージング
