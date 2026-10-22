@@ -105,10 +105,12 @@ and the playing key is coloured by the SPU envelope state (green attack,
 orange decay, blue sustain, purple release), the same palette as SPC.  The
 attack and release colours are held for a quarter of a second because those
 states are often shorter than a frame on the SPU.  Each
-row also has the same vertical level meter as the SPC panel (shared drawing
-code), filled with the level actually used at synthesis (volume x ADSR).  The
-scale is logarithmic (-60..0 dB) because the raw PS1 voice levels are only a
-few percent, and a peak-hold marker keeps the highest level for a second.  Below it a
+row also has a level meter (shared drawing code with SPC): the fill is the
+level actually used at synthesis (volume x ADSR) and the white peak-hold
+marker sits at the voice volume (VOL), so the ADSR closing in can be read
+against the volume ceiling.  The scale is logarithmic (-60..0 dB) because the
+raw PS1 voice levels are only a few percent.  The sample playback position
+bar is one row below it.  Below it a
 thin bar shows the sample playback position (orange point) inside the VAG
 sample, with the loop point as a yellow tick, like the SPC panel.  As in
 the SPC panel the key is latched at note-on and later pitch changes move a

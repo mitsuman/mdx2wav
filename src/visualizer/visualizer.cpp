@@ -1214,8 +1214,8 @@ void Visualizer::renderPSF() {
                          f.active ? 170 : 50, f.active ? 175 : 55,
                          f.active ? 220 : 80);
 
-        // Level meter: same vertical bar shape as the SPC panel, showing the
-        // level actually used in the mix, with a peak-hold marker.
+        // Level meter: the fill is the level actually used in the mix
+        // (volume x ADSR) and the peak marker holds the voice volume (VOL).
         {
             int vol = f.volume_left > f.volume_right ? f.volume_left : f.volume_right;
             if (vol < 0) vol = -vol;
@@ -1224,25 +1224,27 @@ void Visualizer::renderPSF() {
             if (env < 0) env = 0;
             if (env > 0x7FFF) env = 0x7FFF;
 
+            const float vol_norm = levelToMeter(vol);
             const float mix_norm =
                 levelToMeter((int)(((long long)vol * env) / 0x7FFF));
 
+            // Peak hold on the volume, not on the ADSR-modulated level.
             const double now_s = SDL_GetTicks() / 1000.0;
-            if (mix_norm >= psf_peak_[v]) {
-                psf_peak_[v] = mix_norm;
+            if (vol_norm >= psf_peak_[v]) {
+                psf_peak_[v] = vol_norm;
                 psf_peak_time_[v] = now_s;
             } else if (now_s - psf_peak_time_[v] > 1.0) {
                 psf_peak_[v] -= 0.02f;
-                if (psf_peak_[v] < mix_norm) psf_peak_[v] = mix_norm;
+                if (psf_peak_[v] < vol_norm) psf_peak_[v] = vol_norm;
             }
 
-            drawMeterBar(x + label_x + 26, y + 6, 8, 34, true, mix_norm,
+            drawMeterBar(x + label_x + 42, y + 22, 170, 7, false, mix_norm,
                          psf_peak_[v], pr, pg, pb);
         }
 
-        // Playback position within the VAG sample, same bar as SPC.
+        // Playback position within the VAG sample, one row below the meter.
         if (f.active && f.sample_start > 0 && f.sample_end > f.sample_start) {
-            drawPcmPositionBar(x + label_x + 42, y + 24, 80, 4, f.sample_start,
+            drawPcmPositionBar(x + label_x + 42, y + 33, 170, 4, f.sample_start,
                                f.loop_address, f.current_address, f.sample_end,
                                f.active);
         }
