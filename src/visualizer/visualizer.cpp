@@ -1272,7 +1272,7 @@ void Visualizer::renderPSF() {
         if (f.start_address > 0) {
             int sr, sg, sb;
             getSampleColor(f.start_address, sr, sg, sb);
-            SDL_Rect ch_bar = {x + label_x + 20, y + 4, 8, row_h - 8};
+            SDL_Rect ch_bar = {x + label_x + 24, y + 4, 8, row_h - 8};
             SDL_SetRenderDrawColor(renderer_, f.active ? sr : sr / 3,
                                    f.active ? sg : sg / 3,
                                    f.active ? sb : sb / 3, 255);
