@@ -381,6 +381,13 @@ private:
     
     // ヘルパー
     void getChannelColor(int ch, int& r, int& g, int& b);
+
+    // Shared meter parts, used by both the SPC and PSF panels so they always
+    // look the same.
+    void drawMeterBar(int x, int y, int w, int h, bool vertical,
+                      float fill, float peak, int r, int g, int b);
+    void drawPcmPositionBar(int x, int y, int w, int h, int start, int loop,
+                            int pos, int end, bool active);
     void getEGPhaseColor(int phase, int& r, int& g, int& b);
     const char* getNoteName(int note);
     

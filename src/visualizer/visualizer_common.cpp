@@ -323,6 +323,83 @@ void Visualizer::getEGPhaseColor(int phase, int& r, int& g, int& b) {
     }
 }
 
+// Shared level meter: 8 px wide vertical bar (SPC) or a horizontal bar (PSF).
+// fill/peak are 0..1.
+void Visualizer::drawMeterBar(int x, int y, int w, int h, bool vertical,
+                              float fill, float peak, int r, int g, int b) {
+    SDL_Rect bg = {x, y, w, h};
+    SDL_SetRenderDrawColor(renderer_, 30, 30, 50, 255);
+    SDL_RenderFillRect(renderer_, &bg);
+    SDL_SetRenderDrawColor(renderer_, 60, 70, 110, 255);
+    SDL_RenderDrawRect(renderer_, &bg);
+
+    if (fill < 0.0f) fill = 0.0f;
+    if (fill > 1.0f) fill = 1.0f;
+    const int inner_w = w - 2;
+    const int inner_h = h - 2;
+    if (fill > 0.0f) {
+        SDL_SetRenderDrawColor(renderer_, r, g, b, 255);
+        if (vertical) {
+            int fh = (int)(fill * inner_h);
+            if (fh > 0) {
+                SDL_Rect bar = {x + 1, y + h - 1 - fh, inner_w, fh};
+                SDL_RenderFillRect(renderer_, &bar);
+            }
+        } else {
+            int fw = (int)(fill * inner_w);
+            if (fw > 0) {
+                SDL_Rect bar = {x + 1, y + 1, fw, inner_h};
+                SDL_RenderFillRect(renderer_, &bar);
+            }
+        }
+    }
+
+    if (peak > 0.0f) {
+        if (peak > 1.0f) peak = 1.0f;
+        SDL_SetRenderDrawColor(renderer_, 255, 255, 210, 255);
+        if (vertical) {
+            int py = y + h - 1 - (int)(peak * inner_h);
+            if (py < y + 1) py = y + 1;
+            SDL_Rect mark = {x - 1, py, w + 2, 1};
+            SDL_RenderFillRect(renderer_, &mark);
+        } else {
+            int px = x + 1 + (int)(peak * (inner_w - 1));
+            if (px > x + w - 3) px = x + w - 3;
+            SDL_Rect mark = {px, y - 1, 2, h + 2};
+            SDL_RenderFillRect(renderer_, &mark);
+        }
+    }
+}
+
+// Shared PCM playback-position bar (orange point + yellow loop tick).
+void Visualizer::drawPcmPositionBar(int x, int y, int w, int h, int start,
+                                    int loop, int pos, int end, bool active) {
+    if (end <= start) return;
+
+    SDL_Rect bg = {x, y, w, h};
+    SDL_SetRenderDrawColor(renderer_, 30, 30, 50, 255);
+    SDL_RenderFillRect(renderer_, &bg);
+    SDL_SetRenderDrawColor(renderer_, 60, 70, 110, 255);
+    SDL_RenderDrawRect(renderer_, &bg);
+
+    const int span = end - start;
+    if (pos < start) pos = start;
+    if (pos > end) pos = end;
+    const int played = (pos - start) * (w - 2) / span;
+
+    SDL_SetRenderDrawColor(renderer_, active ? 255 : 150, active ? 150 : 80, 0, 255);
+    SDL_Rect point = {x + 1 + played - 1, y - 1, 3, h + 2};
+    if (point.x < x + 1) point.x = x + 1;
+    if (point.x > x + w - 3) point.x = x + w - 3;
+    SDL_RenderFillRect(renderer_, &point);
+
+    if (loop >= start && loop < end) {
+        const int loop_x = x + 1 + (loop - start) * (w - 2) / span;
+        SDL_SetRenderDrawColor(renderer_, 255, 220, 120, 230);
+        SDL_RenderDrawLine(renderer_, loop_x, y - 1, loop_x, y + h);
+    }
+}
+
 // ノート名を取得
 // 音名は常に3文字（音名＋シャープ、またはナチュラルは "-"）にして、
 // オクターブと続く "(nn)" が音名によってずれないようにする。

@@ -50,20 +50,9 @@ void Visualizer::renderSPCChannelInfo() {
     renderBitmapText("SPC700", 10, y + 38, seg_r / 2, seg_g / 2, seg_b / 2);
 
     // Key-on / envelope activity bar next to the voice number.
-    const int env_height = 40;
-    const int env_y = y + 8;
-    SDL_Rect env_bg = {70, env_y, 8, env_height};
-    SDL_SetRenderDrawColor(renderer_, 30, 30, 50, 255);
-    SDL_RenderFillRect(renderer_, &env_bg);
-    SDL_SetRenderDrawColor(renderer_, 60, 70, 110, 255);
-    SDL_RenderDrawRect(renderer_, &env_bg);
-    int env_level = clampInt(c.spc_envelope, 0, 0x7FF);
-    int env_h = (env_level * (env_height - 2)) / 0x7FF;
-    if (env_h > 0) {
-      SDL_SetRenderDrawColor(renderer_, r, g, b, active ? 255 : 120);
-      SDL_Rect env_bar = {71, env_y + env_height - 1 - env_h, 6, env_h};
-      SDL_RenderFillRect(renderer_, &env_bar);
-    }
+    drawMeterBar(70, y + 8, 8, 40, true,
+                 (float)clampInt(c.spc_envelope, 0, 0x7FF) / 0x7FF, 0.0f,
+                 r, g, b);
 
     // Note and pitch information.
     char text[96];
@@ -124,36 +113,8 @@ void Visualizer::renderSPCChannelInfo() {
 
     // PCM playback position within the BRR sample/loop, like the ADPCM bar.
     if (c.spc_source != 0 && c.spc_end > c.spc_source) {
-      const int bar_x = 88;
-      const int bar_y = y + 61;
-      const int bar_w = 140;
-      const int bar_h = 4;
-      const int start = c.spc_source;
-      const int end = c.spc_end;
-      const int span = end - start;
-      int pos = c.spc_brr;
-      if (pos < start) pos = start;
-      if (pos > end) pos = end;
-      const int played = (pos - start) * (bar_w - 2) / span;
-
-      SDL_Rect bg = {bar_x, bar_y, bar_w, bar_h};
-      SDL_SetRenderDrawColor(renderer_, 30, 30, 50, 255);
-      SDL_RenderFillRect(renderer_, &bg);
-      SDL_SetRenderDrawColor(renderer_, 60, 70, 110, 255);
-      SDL_RenderDrawRect(renderer_, &bg);
-
-      // Only the playback point, in orange.  No filled level-meter bar.
-      SDL_SetRenderDrawColor(renderer_, active ? 255 : 150,
-                             active ? 150 : 80, 0, 255);
-      SDL_Rect point = {bar_x + 1 + played - 1, bar_y - 1, 3, bar_h + 2};
-      SDL_RenderFillRect(renderer_, &point);
-
-      // Loop point tick, drawn last so it stays visible at the loop instant.
-      if (c.spc_loop >= start && c.spc_loop <= end) {
-        const int loop_x = bar_x + 1 + (c.spc_loop - start) * (bar_w - 2) / span;
-        SDL_SetRenderDrawColor(renderer_, 255, 220, 120, 230);
-        SDL_RenderDrawLine(renderer_, loop_x, bar_y - 1, loop_x, bar_y + bar_h);
-      }
+      drawPcmPositionBar(88, y + 61, 140, 4, c.spc_source, c.spc_loop,
+                         c.spc_brr, c.spc_end, active);
     }
 
     // Actual generated output for this voice, captured from the S-DSP.

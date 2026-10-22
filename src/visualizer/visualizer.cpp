@@ -1144,37 +1144,27 @@ void Visualizer::renderPSF() {
         renderBitmapText("PS1", x + label_x, y + 27, seg_r / 2, seg_g / 2, seg_b / 2);
 
         snprintf(text, sizeof(text), "PIT %04X", f.pitch & 0x3FFF);
-        renderBitmapText(text, x + label_x + 26, y + 4,
+        renderBitmapText(text, x + label_x + 42, y + 4,
                          f.active ? 120 : 55, f.active ? 200 : 70,
                          f.active ? 255 : 95);
 
         if (f.note > 0) {
             const int octave = f.note / 12 - 1;
             snprintf(text, sizeof(text), "%s%d", getNoteName(f.note), octave);
-            renderBitmapText(text, x + label_x + 88, y + 4,
+            renderBitmapText(text, x + label_x + 104, y + 4,
                              f.active ? 200 : 60, f.active ? 230 : 70,
                              f.active ? 200 : 80);
         }
 
         snprintf(text, sizeof(text), "VOL %04X %04X",
                  (f.volume_left >> 1) & 0x7FFF, (f.volume_right >> 1) & 0x7FFF);
-        renderBitmapText(text, x + label_x + 26, y + 14,
+        renderBitmapText(text, x + label_x + 42, y + 14,
                          f.active ? 170 : 50, f.active ? 175 : 55,
                          f.active ? 220 : 80);
 
-        // Level meter: bar = voice volume, bright part = applied level.
+        // Level meter: same vertical bar shape as the SPC panel, showing the
+        // level actually used in the mix, with a peak-hold marker.
         {
-            const int meter_x = x + label_x + 120;
-            const int meter_y = y + 12;
-            const int meter_w = 92;
-            const int meter_h = 7;
-
-            SDL_Rect bg = {meter_x, meter_y, meter_w, meter_h};
-            SDL_SetRenderDrawColor(renderer_, 24, 24, 48, 255);
-            SDL_RenderFillRect(renderer_, &bg);
-            SDL_SetRenderDrawColor(renderer_, 55, 60, 95, 255);
-            SDL_RenderDrawRect(renderer_, &bg);
-
             int vol = f.volume_left > f.volume_right ? f.volume_left : f.volume_right;
             if (vol < 0) vol = -vol;
             if (vol > 0xFFFE) vol = 0xFFFE;
@@ -1182,20 +1172,8 @@ void Visualizer::renderPSF() {
             if (env < 0) env = 0;
             if (env > 0x7FFF) env = 0x7FFF;
 
-            const float vol_norm = levelToMeter(vol);
             const float mix_norm =
                 levelToMeter((int)(((long long)vol * env) / 0x7FFF));
-
-            const int vol_w = (int)(vol_norm * meter_w);
-            if (vol_w > 0 && f.active) {
-                SDL_Rect vb = {meter_x + 1, meter_y + 1, vol_w, meter_h - 2};
-                if (vb.x + vb.w > meter_x + meter_w - 1) vb.w = meter_x + meter_w - 1 - vb.x;
-                if (vb.w > 0) {
-                    SDL_SetRenderDrawColor(renderer_, pr * 2 / 3, pg * 2 / 3,
-                                           pb * 2 / 3, 255);
-                    SDL_RenderFillRect(renderer_, &vb);
-                }
-            }
 
             const double now_s = SDL_GetTicks() / 1000.0;
             if (mix_norm >= psf_peak_[v]) {
@@ -1206,60 +1184,15 @@ void Visualizer::renderPSF() {
                 if (psf_peak_[v] < mix_norm) psf_peak_[v] = mix_norm;
             }
 
-            const int level_w = (int)(mix_norm * meter_w);
-            if (level_w > 0 && f.active) {
-                SDL_Rect lb = {meter_x + 1, meter_y + 1, level_w, meter_h - 2};
-                if (lb.x + lb.w > meter_x + meter_w - 1) lb.w = meter_x + meter_w - 1 - lb.x;
-                if (lb.w > 0) {
-                    SDL_SetRenderDrawColor(renderer_, pr, pg, pb, 255);
-                    SDL_RenderFillRect(renderer_, &lb);
-                }
-            }
-
-            if (psf_peak_[v] > 0.0f) {
-                int px = meter_x + 1 + (int)(psf_peak_[v] * (meter_w - 2));
-                if (px > meter_x + meter_w - 3) px = meter_x + meter_w - 3;
-                SDL_SetRenderDrawColor(renderer_, 255, 255, 210, 255);
-                SDL_Rect mark = {px, meter_y - 1, 2, meter_h + 2};
-                SDL_RenderFillRect(renderer_, &mark);
-            }
+            drawMeterBar(x + label_x + 26, y + 4, 8, 30, true, mix_norm,
+                         psf_peak_[v], pr, pg, pb);
         }
 
-        // Playback position within the VAG sample.
+        // Playback position within the VAG sample, same bar as SPC.
         if (f.active && f.sample_start > 0 && f.sample_end > f.sample_start) {
-            const int bar_x = x + label_x + 120;
-            const int bar_y = y + 23;
-            const int bar_w = 92;
-            const int bar_h = 4;
-            const int start = f.sample_start;
-            const int end = f.sample_end;
-            const int span = end - start;
-            if (span > 0) {
-                int pos = f.current_address;
-                if (pos < start) pos = start;
-                if (pos > end) pos = end;
-                const int played = (pos - start) * (bar_w - 2) / span;
-
-                SDL_Rect bg = {bar_x, bar_y, bar_w, bar_h};
-                SDL_SetRenderDrawColor(renderer_, 30, 30, 50, 255);
-                SDL_RenderFillRect(renderer_, &bg);
-                SDL_SetRenderDrawColor(renderer_, 60, 70, 110, 255);
-                SDL_RenderDrawRect(renderer_, &bg);
-
-                SDL_SetRenderDrawColor(renderer_, 255, 150, 0, 255);
-                SDL_Rect point = {bar_x + 1 + played - 1, bar_y - 1, 3, bar_h + 2};
-                if (point.x < bar_x + 1) point.x = bar_x + 1;
-                if (point.x > bar_x + bar_w - 3) point.x = bar_x + bar_w - 3;
-                SDL_RenderFillRect(renderer_, &point);
-
-                if (f.loop_address >= start && f.loop_address < end) {
-                    const int loop_x =
-                        bar_x + 1 + (f.loop_address - start) * (bar_w - 2) / span;
-                    SDL_SetRenderDrawColor(renderer_, 255, 220, 120, 230);
-                    SDL_RenderDrawLine(renderer_, loop_x, bar_y - 1, loop_x,
-                                       bar_y + bar_h);
-                }
-            }
+            drawPcmPositionBar(x + label_x + 42, y + 24, 80, 4, f.sample_start,
+                               f.loop_address, f.current_address, f.sample_end,
+                               f.active);
         }
 
         // Keyboard.
