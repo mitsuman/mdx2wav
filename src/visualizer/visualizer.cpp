@@ -1344,13 +1344,13 @@ void Visualizer::renderPSF() {
         // L/R pan bar: a marker between the L and R ends, with a centre line.
         {
             const int pan_x = x + label_x + 150;
-            const int pan_y = y + 13;
+            const int pan_y = y + 4;
             const int pan_w = 70;
             const int pan_h = 9;
-            renderBitmapText("L", pan_x - 7, y + 14,
+            renderBitmapText("L", pan_x - 7, y + 5,
                              f.active ? 150 : 60, f.active ? 170 : 70,
                              f.active ? 220 : 90);
-            renderBitmapText("R", pan_x + pan_w + 2, y + 14,
+            renderBitmapText("R", pan_x + pan_w + 2, y + 5,
                              f.active ? 150 : 60, f.active ? 170 : 70,
                              f.active ? 220 : 90);
 
