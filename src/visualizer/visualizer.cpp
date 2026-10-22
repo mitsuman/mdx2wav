@@ -2091,7 +2091,7 @@ void Visualizer::renderKeyboard() {
                 
                 SDL_Rect key_rect = {x, base_y, white_key_width - 1, white_key_height-2};
                 
-                bool pressed = (spc_mode_ ? channel.key_on : true) &&
+                bool pressed = (spc_mode_ ? (channel.key_on && channel.note > 0) : true) &&
                                (channel.note == midi_note);
                 
                 if (pressed) {

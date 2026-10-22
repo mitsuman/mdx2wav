@@ -2,7 +2,6 @@
 #include "../../gamdx/fmgen/opm.h"
 #include <cstring>
 #include <algorithm>
-#include <cmath>
 #include <sys/time.h>
 
 // 波形バッファサイズの定義
@@ -393,9 +392,8 @@ void YM2151State::setSPCMode(bool enabled) {
 void YM2151State::updateSPCVoice(int ch, bool key_on, bool kon, int note, int volume,
                                  int left_volume, int right_volume, int pitch,
                                  int envelope, int envelope_phase, int source_address,
-                                 int loop_address, int brr_address, bool looped,
-                                 int loop_samples, const int16_t* waveform,
-                                 int waveform_samples) {
+                                 int loop_address, int brr_address,
+                                 const int16_t* waveform, int waveform_samples) {
     if (ch < 0 || ch >= 8) return;
 
     pthread_mutex_lock(&mutex_);
@@ -414,7 +412,6 @@ void YM2151State::updateSPCVoice(int ch, bool key_on, bool kon, int note, int vo
     c.spc_brr = (uint16_t)brr_address;
     c.spc_env_phase = (uint8_t)envelope_phase;
     c.spc_kon = kon ? 1 : 0;
-    c.spc_looped = looped ? 1 : 0;
 
     // Fill the fields the shared keyboard/EG drawing code reads.
     c.operators[0].eg_out = 0x7FF - c.spc_envelope;
@@ -435,38 +432,15 @@ void YM2151State::updateSPCVoice(int ch, bool key_on, bool kon, int note, int vo
     c.operators[0].was_key_on = key_on;
 
     if (waveform && waveform_samples > 0) {
-        // Render the voice as it is actually played: advance through the BRR
-        // sample at the pitch register's rate, wrap at the BRR loop point,
-        // and scale by the current envelope/voice volume.  Auto-scaling is
-        // disabled for SPC so a quiet voice really looks quieter.
-        const int copy = std::max(0, waveform_samples);
-        const bool real_loop = looped && loop_samples > 0 && loop_samples <= copy;
-        int loop_len = real_loop ? loop_samples : copy;
-        const double step = pitch > 0 ? (double)pitch / 4096.0 : 1.0;
-        const double gain = std::max(0.0, std::min(1.0, volume / 127.0));
-
-        for (int i = 0; i < CHANNEL_WAVEFORM_SIZE; i++) {
-            double pos = (double)i * step;
-            if (real_loop && loop_len > 0) {
-                pos = std::fmod(pos, (double)loop_len);
-            } else if (pos >= (double)copy) {
-                channel_waveforms_[ch][i] = 0;
-                continue;
-            }
-
-            int i0 = (int)pos;
-            if (i0 < 0) i0 = 0;
-            const int limit = real_loop ? loop_len : copy;
-            if (i0 >= limit) i0 = limit - 1;
-            const int i1 = std::min(i0 + 1, limit - 1);
-            const double frac = pos - (double)i0;
-            const double value = waveform[i0] * (1.0 - frac) + waveform[i1] * frac;
-            int sample = (int)(value * gain);
-            if (sample > 32767) sample = 32767;
-            else if (sample < -32768) sample = -32768;
-            channel_waveforms_[ch][i] = (int16_t)sample;
+        // The DSP already applied envelope, L/R volume and pitch; just copy
+        // the generated output samples for display and analysis.
+        const int copy = std::min(waveform_samples, CHANNEL_WAVEFORM_SIZE);
+        memcpy(channel_waveforms_[ch], waveform, copy * sizeof(int16_t));
+        if (copy < CHANNEL_WAVEFORM_SIZE) {
+            memset(channel_waveforms_[ch] + copy, 0,
+                   (CHANNEL_WAVEFORM_SIZE - copy) * sizeof(int16_t));
         }
-        c.spc_waveform_samples = CHANNEL_WAVEFORM_SIZE;
+        c.spc_waveform_samples = copy;
     } else {
         c.spc_waveform_samples = 0;
         memset(channel_waveforms_[ch], 0, sizeof(channel_waveforms_[ch]));

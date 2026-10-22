@@ -486,6 +486,28 @@ inline void SPC_DSP::voice_output( voice_t const* v, int ch )
 {
 	// Apply left/right volume
 	int amp = (m.t_output * (int8_t) VREG(v->regs,voll + ch)) >> 7;
+
+	// Capture the actual generated voice output.  The left call starts a new
+	// ring entry; the right call keeps the larger absolute channel so panned
+	// or phase-inverted voices are still visible.
+	{
+		int const vi = (int)(v - m.voices);
+		if ( ch == 0 )
+		{
+			int const idx = m.dbg_wave_pos [vi]++ & (dbg_wave_size - 1);
+			m.dbg_wave_last [vi] = idx;
+			m.dbg_wave [vi] [idx] = (int16_t) amp;
+		}
+		else
+		{
+			int const idx = m.dbg_wave_last [vi];
+			int const prev = m.dbg_wave [vi] [idx];
+			int const mag = amp < 0 ? -amp : amp;
+			int const prev_mag = prev < 0 ? -prev : prev;
+			if ( mag > prev_mag )
+				m.dbg_wave [vi] [idx] = (int16_t) amp;
+		}
+	}
 	
 	// Add to output total
 	m.t_main_out [ch] += amp;
@@ -854,6 +876,9 @@ void SPC_DSP::load( uint8_t const regs [register_count] )
 {
 	memcpy( m.regs, regs, sizeof m.regs );
 	memset( &m.regs [register_count], 0, offsetof (state_t,ram) - register_count );
+	memset( m.dbg_wave, 0, sizeof m.dbg_wave );
+	memset( m.dbg_wave_pos, 0, sizeof m.dbg_wave_pos );
+	memset( m.dbg_wave_last, 0, sizeof m.dbg_wave_last );
 	
 	// Internal state
 	for ( int i = voice_count; --i >= 0; )

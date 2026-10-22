@@ -13,6 +13,9 @@ The only changes are additive accessors used by the visualizer:
 
 * `SPC_DSP::voices()`, `SPC_DSP::regs()`, `SPC_DSP::echo_offset()` and
   `SPC_DSP::echo_length()` expose read-only DSP state.
+* `SPC_DSP::dbg_waveform()` / `dbg_waveform_pos()` expose a small ring buffer
+  of the actual per-voice output, captured after envelope and L/R volume in
+  `voice_output()`.  This is what the visualizer draws.
 * `SNES_SPC::dsp_state()`, `SNES_SPC::smp_ram()` and `SNES_SPC::cpu_pc()` expose
   the DSP object, APU RAM and CPU program counter.
 * The two `(~0x2F00 << …)` register tests were changed to unsigned arithmetic.

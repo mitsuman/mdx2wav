@@ -23,7 +23,7 @@ struct SPC_Filter;
 class SPCPlayer {
  public:
   static const int kVoices = 8;
-  static const int kWaveformSamples = 4096;
+  static const int kWaveformSamples = 800;
 
   struct VoiceState {
     bool key_on;
@@ -40,8 +40,6 @@ class SPCPlayer {
     int source_address;  // DIR entry start address
     int loop_address;    // DIR entry loop address
     int brr_address;     // current BRR block address
-    bool looped;         // decoded stream has the BRR loop flag
-    int loop_samples;    // samples in one BRR loop (0 if unknown)
     int waveform_samples;
     int16_t waveform[kWaveformSamples];
   };

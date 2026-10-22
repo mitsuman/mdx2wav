@@ -3,6 +3,7 @@
 #include <SDL2/SDL.h>
 #include <SDL_ttf.h>
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 namespace {
@@ -66,7 +67,7 @@ void Visualizer::renderSPCChannelInfo() {
 
     // Note and pitch information.
     char text[96];
-    if (!c.key_on) {
+    if (!c.key_on || c.note == 0) {
       snprintf(text, sizeof(text), "NOTE  ---");
     } else {
       const int octave = c.note / 12 - 1;
@@ -118,21 +119,24 @@ void Visualizer::renderSPCChannelInfo() {
     else if (c.left_right & 0x40) pan = " R";
     renderBitmapText(pan, 225, y + 53, active ? 150 : 70, active ? 200 : 90, 255);
 
-    // Decoded BRR waveform for this voice.  A looping sample is repeated into
-    // the display buffer by updateSPCVoice(), so it spans the full strip; a
-    // one-shot only has its actual sample count and is drawn proportionally.
+    // Actual generated output for this voice, captured from the S-DSP.
     int16_t waveform[YM2151State::CHANNEL_WAVEFORM_SIZE];
     state_->getChannelWaveform(ch, waveform, YM2151State::CHANNEL_WAVEFORM_SIZE);
     const int width = channelWaveformWidth();
-    int samples = 0;
-    if (c.spc_waveform_samples > 0) {
-      samples = c.spc_looped
-          ? std::min(YM2151State::CHANNEL_WAVEFORM_SIZE, width)
-          : std::min<int>(c.spc_waveform_samples, width);
+    const int samples = std::min<int>(c.spc_waveform_samples,
+                                      YM2151State::CHANNEL_WAVEFORM_SIZE);
+    // The captured per-voice output is usually much quieter than full scale.
+    // Apply a fixed 4x display gain with a soft limiter: quiet voices become
+    // readable, while loud voices keep their shape instead of clipping flat.
+    int16_t display[YM2151State::CHANNEL_WAVEFORM_SIZE];
+    const float gain = 4.0f * ym2151_waveform_scale_;
+    for (int i = 0; i < samples; i++) {
+      const double x = (double)waveform[i] * gain / 32768.0;
+      display[i] = (int16_t)std::lrint(32767.0 * std::tanh(x));
     }
     renderChannelWaveform(channelWaveformX(), y + 2, width, line_height - 20,
-                          samples > 0 ? waveform : nullptr, samples,
-                          r, g, b, ch, ym2151_waveform_scale_, false);
+                          samples > 0 ? display : nullptr, samples,
+                          r, g, b, ch, 1.0f, false);
 
     y += line_height;
   }

@@ -122,11 +122,17 @@ public:
 
 	// --- state access for mdx2wav's visualizer -----------------------------
 	// Read-only views of the live DSP state, used to draw envelopes, pitch and
-	// the decoded BRR waveform.  Added for the SPC visualizer.
+	// the generated per-voice waveform.  Added for the SPC visualizer.
 	voice_t const* voices() const { return m.voices; }
 	uint8_t const* regs()   const { return m.regs; }
 	int echo_offset() const       { return m.echo_offset; }
 	int echo_length() const       { return m.echo_length; }
+
+	// Per-voice output ring buffer, captured after envelope and L/R volume.
+	// This is the actual generated waveform, not a re-synthesised BRR sample.
+	enum { dbg_wave_size = 2048 };
+	int16_t const* dbg_waveform(int voice) const { return m.dbg_wave[voice]; }
+	int dbg_waveform_pos(int voice) const { return m.dbg_wave_pos[voice]; }
 
 private:
 	enum { brr_block_size = 9 };
@@ -185,6 +191,12 @@ private:
 		int t_echo_in  [2];
 		
 		voice_t voices [voice_count];
+
+		// Visualizer capture: actual L/R output per voice, after envelope
+		// and volume.  Ring index advances once per output sample.
+		int16_t dbg_wave [voice_count] [dbg_wave_size];
+		int dbg_wave_pos [voice_count];
+		int dbg_wave_last [voice_count];
 		
 		// non-emulation state
 		uint8_t* ram; // 64K shared RAM between DSP and SMP

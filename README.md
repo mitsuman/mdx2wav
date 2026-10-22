@@ -81,7 +81,7 @@ LSB on a handful of samples for SPC, over the first seconds of playback.
 `gamdx/snes_spc/` contains Blargg's snes_spc 0.9.0 (LGPL-2.1-or-later) with
 small read-only accessors added for the visualizer.  See
 [gamdx/snes_spc/README.md](gamdx/snes_spc/README.md).  The SPC layout shows all
-eight voices with note, pitch, envelope, source/loop addresses, decoded BRR
-waveform, keyboard, per-voice spectrum, and the global S-DSP status (master and
+eight voices with note, pitch, envelope, source/loop addresses, the actual
+per-voice DSP output waveform, keyboard, per-voice spectrum, and the global S-DSP status (master and
 echo volumes, KON, directory, program counter).  On macOS, `-p` direct audio
 playback works for SPC too; combine it with `-g` for sound and the visualizer.

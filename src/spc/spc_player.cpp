@@ -25,89 +25,6 @@ std::string ReadTag(const uint8_t* data, size_t size, size_t offset, size_t len)
   return std::string((const char*)data + offset, end);
 }
 
-// Decode a BRR stream for display purposes.  This mirrors the S-DSP's decoder
-// closely enough to draw the waveform, but it is not used for audio.
-int DecodeBRR(const uint8_t* ram, int address, int loop_address,
-              int16_t* out, int max_samples, bool* looped_out,
-              int* loop_samples_out) {
-  int written = 0;
-  int addr = address & 0xFFFF;
-  const int loop_addr = loop_address & 0xFFFF;
-  int prev1 = 0;
-  int prev2 = 0;
-
-  bool looped = false;
-  int loop_length = 0;
-  for (int block = 0; block < 256 && written < max_samples; block++) {
-    const int header = ram[addr];
-    addr = (addr + 1) & 0xFFFF;
-
-    // S-DSP BRR header: bit 0 = end, bit 1 = loop.
-    const bool end_flag = (header & 0x01) != 0;
-    const bool loop_flag = (header & 0x02) != 0;
-    if (loop_flag) looped = true;
-
-    const int shift = header >> 4;
-    const int filter = header & 0x0C;
-
-    for (int i = 0; i < 8 && written < max_samples; i++) {
-      const int byte = ram[(addr + i) & 0xFFFF];
-      for (int nibble = 0; nibble < 2 && written < max_samples; nibble++) {
-        int s = nibble == 0 ? (byte >> 4) : (byte & 0x0F);
-        if (s >= 8) s -= 16;
-
-        s = (s << shift) >> 1;
-        if (shift >= 0xD) {
-          s = (s >> 25) << 11;
-        }
-
-        const int p1 = prev1;
-        const int p2 = prev2 >> 1;
-        if (filter >= 8) {
-          s += p1;
-          s -= p2;
-          if (filter == 8) {
-            s += p2 >> 4;
-            s += (p1 * -3) >> 6;
-          } else {
-            s += (p1 * -13) >> 7;
-            s += (p2 * 3) >> 4;
-          }
-        } else if (filter != 0) {
-          s += p1 >> 1;
-          s += (-p1) >> 5;
-        }
-
-        if (s > 32767) s = 32767;
-        else if (s < -32768) s = -32768;
-        s = (int16_t)(s * 2);
-        if (s > 32767) s = 32767;
-        else if (s < -32768) s = -32768;
-
-        prev2 = prev1;
-        prev1 = s;
-        out[written++] = (int16_t)s;
-      }
-    }
-
-    addr = (addr + 8) & 0xFFFF;
-    if (end_flag) {
-      // A looped sample usually sets both end and loop on its final block.
-      // Follow the loop for the display so short loops fill the strip.
-      if (loop_flag && loop_addr != 0) {
-        if (loop_length == 0) loop_length = written;
-        addr = loop_addr;
-      } else {
-        break;
-      }
-    }
-  }
-
-  if (looped_out) *looped_out = looped;
-  if (loop_samples_out) *loop_samples_out = loop_length;
-  return written;
-}
-
 int FreqToNote(double freq) {
   if (freq <= 0.0) return 0;
   double note = 69.0 + 12.0 * log(freq / 440.0) / log(2.0);
@@ -120,44 +37,38 @@ int PitchToNote(int pitch) {
   return FreqToNote(32000.0 * (double)pitch / 4096.0);
 }
 
-// Estimate the fundamental of a decoded BRR loop so the keyboard shows the
-// note that is actually heard rather than the raw sample playback rate.  For
-// noisy or one-shot samples the autocorrelation is weak and the pitch-register
-// estimate is used instead.
-int WaveformToNote(const int16_t* wave, int samples, int pitch) {
-  if (!wave || samples < 16 || pitch <= 0) return PitchToNote(pitch);
+// Estimate the note of the actual per-voice output.  The captured samples are
+// already at the final playback rate, so the autocorrelation period maps
+// directly to frequency.  Returns 0 for noise/unpitched voices.
+int OutputWaveformToNote(const int16_t* wave, int samples) {
+  if (!wave || samples < 16) return 0;
 
   double mean = 0.0;
   for (int i = 0; i < samples; i++) mean += wave[i];
   mean /= samples;
 
   const int max_lag = samples / 2;
-  if (max_lag < 3) return PitchToNote(pitch);
+  if (max_lag < 3) return 0;
+  double norms[513] = {0.0};
+  if (max_lag > 512) return 0;
 
-  double norms[SPCPlayer::kWaveformSamples / 2 + 1] = {0.0};
   double best = 0.0;
   for (int lag = 2; lag <= max_lag; lag++) {
-    double corr = 0.0;
-    double energy_a = 0.0;
-    double energy_b = 0.0;
+    double corr = 0.0, ea = 0.0, eb = 0.0;
     for (int i = 0; i + lag < samples; i++) {
       const double a = wave[i] - mean;
       const double b = wave[i + lag] - mean;
       corr += a * b;
-      energy_a += a * a;
-      energy_b += b * b;
+      ea += a * a;
+      eb += b * b;
     }
-    if (energy_a > 1e-9 && energy_b > 1e-9) {
-      norms[lag] = corr / sqrt(energy_a * energy_b);
+    if (ea > 1e-9 && eb > 1e-9) {
+      norms[lag] = corr / sqrt(ea * eb);
       if (norms[lag] > best) best = norms[lag];
     }
   }
 
-  if (best < 0.5) return PitchToNote(pitch);
-
-  // Prefer the first strong *local* peak.  The global maximum can be a
-  // multiple of the period, and a smooth low-frequency wave can have a high
-  // correlation at very short lags; the first real peak is the fundamental.
+  if (best < 0.5) return 0;
   const double threshold = best * 0.9;
   int best_lag = 0;
   for (int lag = 3; lag < max_lag; lag++) {
@@ -167,11 +78,8 @@ int WaveformToNote(const int16_t* wave, int samples, int pitch) {
       break;
     }
   }
-  if (best_lag <= 0) return PitchToNote(pitch);
-
-  const double sample_freq = 32000.0 / (double)best_lag;
-  const double freq = sample_freq * (double)pitch / 4096.0;
-  return FreqToNote(freq);
+  if (best_lag <= 0) return 0;
+  return FreqToNote(32000.0 / (double)best_lag);
 }
 
 }  // namespace
@@ -416,23 +324,22 @@ void SPCPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
     s.brr_address = voices[i].brr_addr;
 
     if (s.key_on) {
-      int start = s.loop_address ? s.loop_address : s.source_address;
-      if (!start) start = s.brr_address;
-      const int loop_target = s.loop_address ? s.loop_address : start;
-      s.waveform_samples = DecodeBRR(ram, start, loop_target, s.waveform,
-                                     kWaveformSamples, &s.looped,
-                                     &s.loop_samples);
-
-      // Keep the pitch analysis window bounded; the display buffer itself can
-      // be longer (loops are followed to fill it).
-      const int analysis_samples = std::min(s.waveform_samples, 512);
-      s.note = WaveformToNote(s.waveform, analysis_samples, pitch);
+      // Copy the DSP's actual per-voice output ring.  This already contains
+      // envelope, volume, pitch, BRR interpolation and noise, so no synthetic
+      // re-decoding is needed.
+      const int ring_size = SPC_DSP::dbg_wave_size;
+      const int16_t* ring = dsp.dbg_waveform(i);
+      const int pos = dsp.dbg_waveform_pos(i);
+      const int count = std::min(kWaveformSamples, ring_size);
+      for (int j = 0; j < count; j++) {
+        s.waveform[j] = ring[(pos - count + j + ring_size) & (ring_size - 1)];
+      }
+      s.waveform_samples = count;
+      s.note = OutputWaveformToNote(s.waveform, std::min(count, 512));
     } else {
       s.source_address = 0;
       s.loop_address = 0;
       s.brr_address = 0;
-      s.looped = false;
-      s.loop_samples = 0;
       s.waveform_samples = 0;
       s.note = 0;
     }

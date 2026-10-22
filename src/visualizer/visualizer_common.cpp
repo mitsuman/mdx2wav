@@ -58,6 +58,8 @@ void Visualizer::renderChannelWaveform(int x, int y, int width, int height,
     for (int i = 0; i < samples_to_draw - 1; i++) {
         int y1 = center_y - (int)(waveform_data[i] * height * adaptive_scale / 2 / 32768);
         int y2 = center_y - (int)(waveform_data[i + 1] * height * adaptive_scale / 2 / 32768);
+        y1 = std::max(y, std::min(y + height - 1, y1));
+        y2 = std::max(y, std::min(y + height - 1, y2));
         SDL_RenderDrawLine(renderer_, x + i, y1, x + i + 1, y2);
     }
 #else
@@ -104,6 +106,8 @@ void Visualizer::renderChannelWaveform(int x, int y, int width, int height,
         for (int i = 0; i < samples_to_draw - 1; i++) {
             int y1 = center_y - (waveform_data[start_offset + i] * height * adaptive_scale / 2 / 32768);
             int y2 = center_y - (waveform_data[start_offset + i + 1] * height * adaptive_scale / 2 / 32768);
+            y1 = std::max(y, std::min(y + height - 1, y1));
+            y2 = std::max(y, std::min(y + height - 1, y2));
             
             SDL_RenderDrawLine(renderer_, x + i, y1, x + i + 1, y2);
         }

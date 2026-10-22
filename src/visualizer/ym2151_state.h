@@ -99,7 +99,6 @@ public:
         uint16_t spc_brr;          // current BRR block address
         uint8_t  spc_env_phase;    // 0 release, 1 attack, 2 decay, 3 sustain
         uint8_t  spc_kon;          // KON register bit
-        uint8_t  spc_looped;       // decoded BRR has the loop flag
         uint16_t spc_waveform_samples; // valid samples in channel_waveforms_
     };
 
@@ -174,9 +173,8 @@ public:
     void updateSPCVoice(int ch, bool key_on, bool kon, int note, int volume,
                         int left_volume, int right_volume, int pitch,
                         int envelope, int envelope_phase, int source_address,
-                        int loop_address, int brr_address, bool looped,
-                        int loop_samples, const int16_t* waveform,
-                        int waveform_samples);
+                        int loop_address, int brr_address,
+                        const int16_t* waveform, int waveform_samples);
     void setSPCGlobal(const SPCGlobal& global);
     void getSPCGlobal(SPCGlobal& out);
 

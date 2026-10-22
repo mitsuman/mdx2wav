@@ -49,7 +49,7 @@ SION set are in the song picker.
 | Resampler | `gamdx/downsample` | unchanged |
 | Visualizer | `src/visualizer` | reused through Emscripten's SDL2 / SDL2_ttf / SDL2_image ports |
 | SPC playback | `gamdx/snes_spc`, `src/spc` | Blargg's SPC700 + S-DSP; 32 kHz output resampled to 44.1 kHz |
-| SPC visualizer | `src/visualizer/visualizer_spc.cpp` | eight voices, BRR waveform, S-DSP status |
+| SPC visualizer | `src/visualizer/visualizer_spc.cpp` | eight voices, actual DSP output waveform, S-DSP status |
 | Harness | `web/src/mdxweb.cpp` | new: step-driven loop replacing `src/mdx2wav.cpp`'s `main()` |
 | MDX/PDX loading | `web/src/mdxweb_load.cpp` | new: browser equivalent of `LoadMDX()` |
 | FFmpeg video encoder | `web/src/video_encoder_stub.cpp` | stubbed out; the browser draws to a canvas instead |
