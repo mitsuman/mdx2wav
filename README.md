@@ -102,7 +102,9 @@ keys) and a 256 px captured-waveform panel like the SPC layout.  Voices 16..23
 are only listed as note names in the header, in case a driver uses them.  The rest of the row is the voice's
 own eight-octave keyboard (C0..C7), as dense as the SPC keyboard but shorter,
 and the playing key is coloured by the SPU envelope state (green attack,
-orange decay, blue sustain, purple release), the same palette as SPC.  The
+orange decay, blue sustain, purple release), the same palette as SPC.  A
+key-on always shows the key-on colour for at least one frame in every layout
+(MDX, SPC and PSF), even when the envelope moves on immediately.  The
 attack and release colours are held for a quarter of a second because those
 states are often shorter than a frame on the SPU.  Each
 row also has a level meter (shared drawing code with SPC): the fill is the

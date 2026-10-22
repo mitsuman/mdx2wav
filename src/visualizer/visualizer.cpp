@@ -154,6 +154,7 @@ Visualizer::Visualizer()
         keyboard_octave_offset_[i] = 0;
         keyboard_offset_hold_until_s_[i] = 0.0;
         keyboard_latched_note_[i] = 0;
+        keyboard_key_on_prev_[i] = false;
         psf_latched_note_[i] = 0;
         psf_peak_[i] = 0.0f;
         psf_peak_time_[i] = 0.0;
@@ -1093,6 +1094,7 @@ void Visualizer::setPSFMode(bool enabled) {
     if (enabled) {
         psf_voice_count_ = 24;
         for (int i = 0; i < 24; i++) {
+            keyboard_key_on_prev_[i] = false;
             psf_latched_note_[i] = 0;
             psf_peak_[i] = 0.0f;
             psf_peak_time_[i] = 0.0;
@@ -2638,6 +2640,13 @@ void Visualizer::renderKeyboard() {
         }
         const int octave_offset = held_offset;
         
+        // Key-on edge: the key must be shown in the key-on colour for at
+        // least one frame, even if the envelope moves on immediately.
+        bool key_on_edge = false;
+        if (channel.key_on && !keyboard_key_on_prev_[ch]) key_on_edge = true;
+        keyboard_key_on_prev_[ch] = channel.key_on;
+        if (spc_mode_ && channel.spc_note_on) key_on_edge = true;
+
         // EGフェーズに基づく色を決定（全オペレータの中で最も進んでいるフェーズを使用）
         int dominant_phase = 0;  // デフォルトはoff
         {
@@ -2660,7 +2669,8 @@ void Visualizer::renderKeyboard() {
                 }
             }
         }
-        
+        if (key_on_edge) dominant_phase = 1;
+
         // EGフェーズに応じた色を設定
         int r, g, b;
         switch (dominant_phase) {
