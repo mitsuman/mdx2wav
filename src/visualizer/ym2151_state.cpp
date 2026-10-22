@@ -413,7 +413,6 @@ void YM2151State::updateSPCVoice(int ch, bool key_on, bool kon, int note, int vo
     c.spc_env_phase = (uint8_t)envelope_phase;
     c.spc_kon = kon ? 1 : 0;
     c.spc_looped = looped ? 1 : 0;
-    c.spc_waveform_samples = (uint16_t)std::max(0, std::min(waveform_samples, CHANNEL_WAVEFORM_SIZE));
 
     // Fill the fields the shared keyboard/EG drawing code reads.
     c.operators[0].eg_out = 0x7FF - c.spc_envelope;
@@ -435,21 +434,33 @@ void YM2151State::updateSPCVoice(int ch, bool key_on, bool kon, int note, int vo
 
     if (waveform && waveform_samples > 0) {
         int copy = std::min(waveform_samples, CHANNEL_WAVEFORM_SIZE);
-        memcpy(channel_waveforms_[ch], waveform, copy * sizeof(int16_t));
         if (copy < CHANNEL_WAVEFORM_SIZE) {
             if (looped) {
-                // Fill the display buffer with repetitions of the loop so the
-                // waveform and spectrum spans the whole strip.  Without this
-                // the zero-padded tail made short loops look like a tiny blip.
-                for (int i = copy; i < CHANNEL_WAVEFORM_SIZE; i++) {
-                    channel_waveforms_[ch][i] = channel_waveforms_[ch][i % copy];
+                // Repeat a short loop so the waveform and spectrum span the
+                // whole strip instead of leaving a zero-padded tail.
+                for (int i = 0; i < CHANNEL_WAVEFORM_SIZE; i++) {
+                    channel_waveforms_[ch][i] = waveform[i % copy];
                 }
             } else {
-                memset(channel_waveforms_[ch] + copy, 0,
-                       (CHANNEL_WAVEFORM_SIZE - copy) * sizeof(int16_t));
+                // A one-shot shorter than the strip is stretched linearly.
+                // Showing a 16-sample transient as a 16-pixel blip looks like
+                // a rendering bug, even though it is the real sample length.
+                const int den = CHANNEL_WAVEFORM_SIZE - 1;
+                for (int i = 0; i < CHANNEL_WAVEFORM_SIZE; i++) {
+                    const int num = i * (copy - 1);
+                    const int i0 = num / den;
+                    const int i1 = std::min(i0 + 1, copy - 1);
+                    const int rem = num % den;
+                    channel_waveforms_[ch][i] = (int16_t)
+                        ((waveform[i0] * (den - rem) + waveform[i1] * rem) / den);
+                }
             }
+        } else {
+            memcpy(channel_waveforms_[ch], waveform, CHANNEL_WAVEFORM_SIZE * sizeof(int16_t));
         }
+        c.spc_waveform_samples = CHANNEL_WAVEFORM_SIZE;
     } else {
+        c.spc_waveform_samples = 0;
         memset(channel_waveforms_[ch], 0, sizeof(channel_waveforms_[ch]));
     }
     pthread_mutex_unlock(&mutex_);

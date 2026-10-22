@@ -22,9 +22,10 @@ BRR_ADDR = 0x2000
 
 def brr_block(samples, shift=12, loop=False, end=False):
     header = (shift << 4) & 0xF0
-    if loop:
-        header |= 0x01
+    # S-DSP BRR header: bit 0 = end, bit 1 = loop.
     if end:
+        header |= 0x01
+    if loop:
         header |= 0x02
     data = bytearray()
     for i in range(0, 16, 2):

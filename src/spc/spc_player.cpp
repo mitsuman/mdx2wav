@@ -27,10 +27,11 @@ std::string ReadTag(const uint8_t* data, size_t size, size_t offset, size_t len)
 
 // Decode a BRR stream for display purposes.  This mirrors the S-DSP's decoder
 // closely enough to draw the waveform, but it is not used for audio.
-int DecodeBRR(const uint8_t* ram, int address, int16_t* out, int max_samples,
-              bool* looped_out) {
+int DecodeBRR(const uint8_t* ram, int address, int loop_address,
+              int16_t* out, int max_samples, bool* looped_out) {
   int written = 0;
   int addr = address & 0xFFFF;
+  const int loop_addr = loop_address & 0xFFFF;
   int prev1 = 0;
   int prev2 = 0;
 
@@ -38,7 +39,11 @@ int DecodeBRR(const uint8_t* ram, int address, int16_t* out, int max_samples,
   for (int block = 0; block < 64 && written < max_samples; block++) {
     const int header = ram[addr];
     addr = (addr + 1) & 0xFFFF;
-    if (header & 0x01) looped = true;
+
+    // S-DSP BRR header: bit 0 = end, bit 1 = loop.
+    const bool end_flag = (header & 0x01) != 0;
+    const bool loop_flag = (header & 0x02) != 0;
+    if (loop_flag) looped = true;
 
     const int shift = header >> 4;
     const int filter = header & 0x0C;
@@ -84,7 +89,15 @@ int DecodeBRR(const uint8_t* ram, int address, int16_t* out, int max_samples,
     }
 
     addr = (addr + 8) & 0xFFFF;
-    if (header & 0x02) break;  // end flag
+    if (end_flag) {
+      // A looped sample usually sets both end and loop on its final block.
+      // Follow the loop for the display so short loops fill the strip.
+      if (loop_flag && loop_addr != 0) {
+        addr = loop_addr;
+      } else {
+        break;
+      }
+    }
   }
 
   if (looped_out) *looped_out = looped;
@@ -401,23 +414,14 @@ void SPCPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
     if (s.key_on) {
       int start = s.loop_address ? s.loop_address : s.source_address;
       if (!start) start = s.brr_address;
-      s.waveform_samples = DecodeBRR(ram, start, s.waveform, kWaveformSamples, &s.looped);
+      const int loop_target = s.loop_address ? s.loop_address : start;
+      s.waveform_samples = DecodeBRR(ram, start, loop_target, s.waveform,
+                                     kWaveformSamples, &s.looped);
 
-      // A short loop only contains one period.  Repeat it for the pitch
-      // estimate so autocorrelation has enough overlapping samples; the
-      // displayed waveform stays as it was decoded.
-      int analysis_samples = s.waveform_samples;
-      const int16_t* analysis = s.waveform;
-      int16_t repeated[SPCPlayer::kWaveformSamples];
-      if (s.loop_address && analysis_samples > 0 &&
-          analysis_samples < SPCPlayer::kWaveformSamples) {
-        for (int i = 0; i < SPCPlayer::kWaveformSamples; i++) {
-          repeated[i] = s.waveform[i % analysis_samples];
-        }
-        analysis = repeated;
-        analysis_samples = SPCPlayer::kWaveformSamples;
-      }
-      s.note = WaveformToNote(analysis, analysis_samples, pitch);
+      // Keep the pitch analysis window bounded; the display buffer itself can
+      // be longer (loops are followed to fill it).
+      const int analysis_samples = std::min(s.waveform_samples, 512);
+      s.note = WaveformToNote(s.waveform, analysis_samples, pitch);
     } else {
       s.source_address = 0;
       s.loop_address = 0;
