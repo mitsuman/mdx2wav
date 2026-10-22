@@ -41,6 +41,17 @@ std::string sjisToUtf8(const char* text) {
     return std::string(out);
 }
 
+// Map a 16-bit SPU level to 0..1 on a -60 dB..0 dB scale.
+float levelToMeter(int level) {
+    if (level <= 0) return 0.0f;
+    if (level > 0xFFFE) level = 0xFFFE;
+    const float db = 20.0f * log10f((float)level / 65534.0f);
+    float n = (db + 60.0f) / 60.0f;
+    if (n < 0.0f) n = 0.0f;
+    if (n > 1.0f) n = 1.0f;
+    return n;
+}
+
 std::string pathBaseName(const char* path) {
     if (!path) return std::string();
     const char* slash = strrchr(path, '/');
@@ -1112,22 +1123,60 @@ void Visualizer::renderPSF() {
                              f.active ? 200 : 80);
         }
 
+        // Volume registers, shown on the 0..0x7FFF register scale.
         snprintf(text, sizeof(text), "VOL %04X %04X",
-                 f.volume_left & 0x3FFF, f.volume_right & 0x3FFF);
+                 (f.volume_left >> 1) & 0x7FFF, (f.volume_right >> 1) & 0x7FFF);
         renderBitmapText(text, x + label_x + 30, y + 18,
                          f.active ? 170 : 50, f.active ? 175 : 55,
                          f.active ? 220 : 80);
 
-        // Envelope bar on the same line as VOL.
-        SDL_Rect bar = {x + label_x + 130, y + 16, 54, 8};
-        SDL_SetRenderDrawColor(renderer_, 28, 28, 55, 255);
-        SDL_RenderFillRect(renderer_, &bar);
-        int w = (f.envelope * 54) / 0x7FFF;
-        if (w > 54) w = 54;
-        if (w > 0 && f.active) {
-            bar.w = w;
-            SDL_SetRenderDrawColor(renderer_, pr, pg, pb, 255);
-            SDL_RenderFillRect(renderer_, &bar);
+        // Level meter: the bar is the voice volume, and the bright part is the
+        // level actually used when synthesising (volume x ADSR envelope).
+        {
+            const int meter_x = x + label_x + 130;
+            const int meter_y = y + 16;
+            const int meter_w = 70;
+            const int meter_h = 9;
+
+            SDL_Rect bg = {meter_x, meter_y, meter_w, meter_h};
+            SDL_SetRenderDrawColor(renderer_, 24, 24, 48, 255);
+            SDL_RenderFillRect(renderer_, &bg);
+            SDL_SetRenderDrawColor(renderer_, 55, 60, 95, 255);
+            SDL_RenderDrawRect(renderer_, &bg);
+
+            int vol = f.volume_left > f.volume_right ? f.volume_left : f.volume_right;
+            if (vol < 0) vol = -vol;
+            if (vol > 0xFFFE) vol = 0xFFFE;
+            int env = f.envelope;
+            if (env < 0) env = 0;
+            if (env > 0x7FFF) env = 0x7FFF;
+
+            // Logarithmic scale (-60 dB ... 0 dB): the raw PS1 voice levels
+            // are only a few percent, so a linear bar would barely move.
+            const float vol_norm = levelToMeter(vol);
+            const float mix_norm =
+                levelToMeter((int)(((long long)vol * env) / 0x7FFF));
+
+            const int vol_w = (int)(vol_norm * meter_w);
+            if (vol_w > 0 && f.active) {
+                SDL_Rect vb = {meter_x + 1, meter_y + 1, vol_w, meter_h - 2};
+                if (vb.x + vb.w > meter_x + meter_w - 1) vb.w = meter_x + meter_w - 1 - vb.x;
+                if (vb.w > 0) {
+                    SDL_SetRenderDrawColor(renderer_, pr * 2 / 3, pg * 2 / 3,
+                                           pb * 2 / 3, 255);
+                    SDL_RenderFillRect(renderer_, &vb);
+                }
+            }
+
+            const int level_w = (int)(mix_norm * meter_w);
+            if (level_w > 0 && f.active) {
+                SDL_Rect lb = {meter_x + 1, meter_y + 1, level_w, meter_h - 2};
+                if (lb.x + lb.w > meter_x + meter_w - 1) lb.w = meter_x + meter_w - 1 - lb.x;
+                if (lb.w > 0) {
+                    SDL_SetRenderDrawColor(renderer_, pr, pg, pb, 255);
+                    SDL_RenderFillRect(renderer_, &lb);
+                }
+            }
         }
 
         // Per-voice keyboard.
