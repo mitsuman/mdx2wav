@@ -192,6 +192,51 @@ std::string baseName(const std::string& path) {
   return slash == std::string::npos ? path : path.substr(slash + 1);
 }
 
+// 曲名だけをヘッダから読む（ファイルを再生せずにファイル一覧へ出すため）。
+// 文字コードはそのまま（MDX/SPC とも Shift-JIS）返し、表示側で変換する。
+std::string readMusicTitle(const std::string& path) {
+  FILE* f = fopen(path.c_str(), "rb");
+  if (!f) return std::string();
+
+  unsigned char head[0x220];
+  const size_t got = fread(head, 1, sizeof(head), f);
+  fclose(f);
+
+  std::string name = baseName(path);
+  auto ends_with = [&name](const char* ext) {
+    const size_t n = strlen(ext);
+    if (name.size() < n) return false;
+    std::string tail = name.substr(name.size() - n);
+    for (size_t i = 0; i < n; i++) tail[i] = (char)tolower((unsigned char)tail[i]);
+    return tail == ext;
+  };
+
+  std::string title;
+  if (ends_with(".spc")) {
+    // ID666 text tag follows the 0x2E header when bit 0 of 0x23 is set.
+    if (got > 0x2E && head[0x23] != 0) {
+      size_t len = 0;
+      while (len < 32 && 0x2E + len < got && head[0x2E + len] != 0) len++;
+      title.assign((const char*)head + 0x2E, len);
+    }
+  } else {
+    // MDX: the title is the plain text after the 10-byte header, ended by CR LF.
+    for (size_t i = MAGIC_OFFSET; i < got; i++) {
+      if (head[i] == 0 || head[i] == 0x1A) break;
+      if (head[i] == 0x0D && i + 1 < got && head[i + 1] == 0x0A) break;
+      if (head[i] == 0x0A) break;
+      title.push_back((char)head[i]);
+    }
+  }
+
+  while (!title.empty() &&
+         (title.back() == ' ' || title.back() == '\t' || title.back() == '\r' ||
+          title.back() == '\n')) {
+    title.pop_back();
+  }
+  return title;
+}
+
 // ディレクトリ内のMDX/SPCファイルを列挙
 std::vector<std::string> listMusicFiles(const char* filepath) {
   std::vector<std::string> files;
@@ -537,7 +582,9 @@ int main(int argc, char **argv) {
 
   // ファイルリストを準備（ビジュアライザー用）
   std::vector<std::string> file_list;
+  std::vector<std::string> file_titles;
   std::vector<const char*> file_ptrs;
+  std::vector<const char*> title_ptrs;
   int current_file_index = 0;
 
   if (enable_visualizer) {
@@ -644,12 +691,20 @@ int main(int argc, char **argv) {
       visualizer->setSpectrumDebug(spectrum_debug_filename);
     }
 
-    // ファイルリストを設定
+    // ファイルリストを設定。  ファイル名だけだと選びにくいので、ヘッダから
+    // 読んだ曲名も一緒に渡す（フィルタモードで表示する）。
     if (!file_list.empty()) {
+      file_titles.clear();
+      title_ptrs.clear();
       for (const auto& f : file_list) {
         file_ptrs.push_back(f.c_str());
+        file_titles.push_back(readMusicTitle(f));
       }
-      visualizer->setFileList(file_ptrs.data(), file_ptrs.size(), current_file_index);
+      for (const auto& t : file_titles) {
+        title_ptrs.push_back(t.c_str());
+      }
+      visualizer->setFileList(file_ptrs.data(), title_ptrs.data(),
+                              (int)file_ptrs.size(), current_file_index);
     }
 
     // スクリーンショット専用モードの設定

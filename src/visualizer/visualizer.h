@@ -107,8 +107,9 @@ public:
     void setSongTitle(const char* title);
     void setFilename(const char* filename);
     
-    // ファイルリストの設定
-    void setFileList(const char** files, int count, int current_index);
+    // ファイルリストの設定（titles は files と同じ要素数。無くてもよい）
+    void setFileList(const char** files, const char** titles, int count,
+                     int current_index);
     // 曲送り後などに、リスト内の現在位置だけを更新する
     void setCurrentFileIndex(int index);
     
@@ -117,6 +118,9 @@ public:
     int getRequestedFileIndex() const { return requested_file_index_; }
     void clearFileChangeRequest() { file_change_requested_ = false; }
     
+    // ファイル一覧（フィルタモード）表示中か
+    bool isFilerMode() const { return filer_mode_; }
+
     // 曲の再スタート要求
     bool hasRestartRequest() const { return restart_requested_; }
     void clearRestartRequest() { restart_requested_ = false; }
@@ -233,8 +237,12 @@ private:
     
     // ファイルリスト管理
     const char** file_list_;
+    const char** file_titles_;   // may be nullptr
     int file_list_count_;
     int current_file_index_;
+    bool filer_mode_;
+    int filer_selection_;
+    int filer_scroll_;
     bool file_change_requested_;
     int requested_file_index_;
     bool restart_requested_;
@@ -291,6 +299,9 @@ private:
     
     // 描画メソッド
     void renderTitle();
+    void renderFiler();
+    int filerRowCount() const;
+    void ensureFilerSelectionVisible();
     void renderTimerInfo();
     void renderChannelInfo();
     void renderSPCChannelInfo();

@@ -21,6 +21,34 @@
 // 波形表示用のバッファサイズ
 static const int WAVEFORM_BUFFER_SIZE = 2048;
 
+namespace {
+
+// MDX / SPC の曲名は Shift-JIS なので、表示用に UTF-8 へ変換する。
+std::string sjisToUtf8(const char* text) {
+    if (!text || !*text) return std::string();
+    iconv_t cd = iconv_open("UTF-8", "SHIFT_JIS");
+    if (cd == (iconv_t)-1) return std::string(text);
+
+    char out[1024];
+    char* inbuf = const_cast<char*>(text);
+    size_t inleft = strlen(text);
+    char* outbuf = out;
+    size_t outleft = sizeof(out) - 1;
+    const size_t res = iconv(cd, &inbuf, &inleft, &outbuf, &outleft);
+    iconv_close(cd);
+    *outbuf = '\0';
+    if (res == (size_t)-1) return std::string(text);
+    return std::string(out);
+}
+
+std::string pathBaseName(const char* path) {
+    if (!path) return std::string();
+    const char* slash = strrchr(path, '/');
+    return std::string(slash ? slash + 1 : path);
+}
+
+}  // namespace
+
 // 内部実装用の構造体
 struct VisualizerImpl {
     std::vector<float> waveform_left;
@@ -64,8 +92,12 @@ Visualizer::Visualizer()
     , bitmap_chars_per_row_(16)
     , elapsed_time_(0.0)
     , file_list_(nullptr)
+    , file_titles_(nullptr)
     , file_list_count_(0)
     , current_file_index_(0)
+    , filer_mode_(false)
+    , filer_selection_(0)
+    , filer_scroll_(0)
     , file_change_requested_(false)
     , requested_file_index_(0)
     , restart_requested_(false)
@@ -510,6 +542,42 @@ void Visualizer::update() {
             running_ = false;
             return;
         } else if (event.type == SDL_KEYDOWN) {
+            const SDL_Keycode sym = event.key.keysym.sym;
+
+            // ファイル一覧（フィルタモード）を開いている間は、この中だけで
+            // 操作を完結させる。他のキーは無視する。
+            if (filer_mode_) {
+                if (sym == SDLK_UP && file_list_count_ > 0) {
+                    filer_selection_ = (filer_selection_ - 1 + file_list_count_) %
+                                       file_list_count_;
+                    ensureFilerSelectionVisible();
+                } else if (sym == SDLK_DOWN && file_list_count_ > 0) {
+                    filer_selection_ = (filer_selection_ + 1) % file_list_count_;
+                    ensureFilerSelectionVisible();
+                } else if ((sym == SDLK_RETURN || sym == SDLK_KP_ENTER) &&
+                           file_list_count_ > 0) {
+                    // 選択した曲を再生する（実際のロードは main 側で行う）
+                    requested_file_index_ = filer_selection_;
+                    file_change_requested_ = true;
+                    filer_mode_ = false;
+                    return;
+                } else if (sym == SDLK_ESCAPE || sym == SDLK_f) {
+                    filer_mode_ = false;
+                }
+                continue;
+            }
+
+            if (sym == SDLK_f) {
+                // フィルタモードの開閉
+                if (file_list_count_ > 0) {
+                    filer_mode_ = true;
+                    filer_selection_ = current_file_index_;
+                    filer_scroll_ = 0;
+                    ensureFilerSelectionVisible();
+                }
+                continue;
+            }
+
             if (event.key.keysym.sym == SDLK_ESCAPE || event.key.keysym.sym == SDLK_q) {
                 running_ = false;
                 return;
@@ -606,8 +674,6 @@ void Visualizer::update() {
                 triggerNote(63, true); // D#4
             } else if (event.key.keysym.sym == SDLK_d) {
                 triggerNote(64, true); // E4
-            } else if (event.key.keysym.sym == SDLK_f) {
-                triggerNote(65, true); // F4
             } else if (event.key.keysym.sym == SDLK_t) {
                 triggerNote(66, true); // F#4
             } else if (event.key.keysym.sym == SDLK_g) {
@@ -647,8 +713,6 @@ void Visualizer::update() {
                 triggerNote(63, false);
             } else if (event.key.keysym.sym == SDLK_d) {
                 triggerNote(64, false);
-            } else if (event.key.keysym.sym == SDLK_f) {
-                triggerNote(65, false);
             } else if (event.key.keysym.sym == SDLK_t) {
                 triggerNote(66, false);
             } else if (event.key.keysym.sym == SDLK_g) {
@@ -695,7 +759,8 @@ void Visualizer::update() {
         renderSpectrum();
     }
     //renderWaveform();
-    
+    renderFiler();
+
     // 画面更新
     SDL_RenderPresent(renderer_);
     
@@ -922,10 +987,13 @@ void Visualizer::setFilename(const char* filename) {
     }
 }
 
-void Visualizer::setFileList(const char** files, int count, int current_index) {
+void Visualizer::setFileList(const char** files, const char** titles, int count,
+                             int current_index) {
     file_list_ = files;
+    file_titles_ = titles;
     file_list_count_ = count;
     current_file_index_ = current_index;
+    filer_selection_ = current_index;
     file_change_requested_ = false;
 }
 
@@ -937,6 +1005,7 @@ void Visualizer::setCurrentFileIndex(int index) {
     if (index < 0) index = 0;
     if (index >= file_list_count_) index = file_list_count_ - 1;
     current_file_index_ = index;
+    filer_selection_ = index;
 }
 
 // テキスト描画ヘルパー
@@ -1568,6 +1637,144 @@ void Visualizer::renderAlgorithmDiagram(int x, int y, int algorithm, const YM215
             SDL_RenderDrawLine(renderer_, op_x + box_w, y + (int)(spacing_v*1.5) + box_h/2, out_x, y);
             break;
         }
+    }
+}
+
+int Visualizer::filerRowCount() const {
+    int rows = (window_height_ - 60 - 100) / 22;
+    if (rows < 3) rows = 3;
+    return rows;
+}
+
+void Visualizer::ensureFilerSelectionVisible() {
+    const int rows = filerRowCount();
+    if (filer_selection_ < filer_scroll_) {
+        filer_scroll_ = filer_selection_;
+    } else if (filer_selection_ >= filer_scroll_ + rows) {
+        filer_scroll_ = filer_selection_ - rows + 1;
+    }
+    if (filer_scroll_ < 0) filer_scroll_ = 0;
+    const int max_scroll = std::max(0, file_list_count_ - rows);
+    if (filer_scroll_ > max_scroll) filer_scroll_ = max_scroll;
+}
+
+// ファイル一覧（フィルタモード）。F キーで開閉し、↑↓で選択、Enterで再生。
+void Visualizer::renderFiler() {
+    if (!filer_mode_ || !file_list_ || file_list_count_ <= 0) return;
+
+    TTF_Font* font_title = (TTF_Font*)(font_medium_ ? font_medium_ : font_small_);
+    TTF_Font* font_row = (TTF_Font*)(font_small_ ? font_small_ : font_medium_);
+    if (!font_row) return;
+
+    // 背景を暗くする
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    SDL_Rect dim = {0, 0, window_width_, window_height_};
+    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 180);
+    SDL_RenderFillRect(renderer_, &dim);
+
+    const int margin = 40;
+    const int panel_x = margin;
+    const int panel_y = 26;
+    const int panel_w = window_width_ - margin * 2;
+    const int panel_h = window_height_ - 52;
+
+    SDL_Rect panel = {panel_x, panel_y, panel_w, panel_h};
+    SDL_SetRenderDrawColor(renderer_, 18, 18, 46, 240);
+    SDL_RenderFillRect(renderer_, &panel);
+    SDL_SetRenderDrawColor(renderer_, 90, 110, 190, 255);
+    SDL_RenderDrawRect(renderer_, &panel);
+
+    // ヘッダ
+    char header[128];
+    snprintf(header, sizeof(header), "FILE LIST   %d files", file_list_count_);
+    renderText(renderer_, font_title, header, panel_x + 20, panel_y + 10,
+               200, 220, 255);
+    renderText(renderer_, font_small_, "UP/DOWN: select   ENTER: play   F/ESC: close",
+               panel_x + panel_w - 430, panel_y + 14, 130, 150, 200);
+
+    const int row_h = 22;
+    const int rows = filerRowCount();
+    const int list_y = panel_y + 46;
+    const int name_x = panel_x + 24;
+    const int title_x = panel_x + (int)(panel_w * 0.55);
+    const int title_max_w = panel_x + panel_w - title_x - 20;
+
+    for (int i = 0; i < rows; i++) {
+        const int idx = filer_scroll_ + i;
+        if (idx >= file_list_count_) break;
+        const int y = list_y + i * row_h;
+        const bool selected = (idx == filer_selection_);
+
+        if (selected) {
+            SDL_Rect hi = {panel_x + 10, y - 2, panel_w - 20, row_h};
+            SDL_SetRenderDrawColor(renderer_, 55, 75, 150, 255);
+            SDL_RenderFillRect(renderer_, &hi);
+            SDL_SetRenderDrawColor(renderer_, 130, 160, 255, 255);
+            SDL_RenderDrawRect(renderer_, &hi);
+        }
+
+        char line[512];
+        snprintf(line, sizeof(line), "%s%s", selected ? "> " : "  ",
+                 pathBaseName(file_list_[idx]).c_str());
+        const Uint8 r = selected ? 240 : 170;
+        const Uint8 g = selected ? 245 : 185;
+        const Uint8 b = selected ? 255 : 210;
+        // 長いファイル名は曲名の列に食い込まないよう末尾を省略する
+        int name_w = 0, name_h = 0;
+        const int name_max_w = title_x - name_x - 24;
+        if (TTF_SizeUTF8(font_row, line, &name_w, &name_h) == 0 &&
+            name_w > name_max_w) {
+            std::string clipped(line);
+            while (clipped.size() > 3) {
+                clipped.erase(clipped.size() - 1);
+                if (TTF_SizeUTF8(font_row, (clipped + "...").c_str(), &name_w, &name_h) == 0 &&
+                    name_w <= name_max_w) {
+                    clipped += "...";
+                    break;
+                }
+            }
+            renderText(renderer_, font_row, clipped.c_str(), name_x, y, r, g, b);
+        } else {
+            renderText(renderer_, font_row, line, name_x, y, r, g, b);
+        }
+
+        if (file_titles_ && file_titles_[idx] && file_titles_[idx][0]) {
+            const std::string title = sjisToUtf8(file_titles_[idx]);
+            int tw = 0, th = 0;
+            if (TTF_SizeUTF8(font_row, title.c_str(), &tw, &th) == 0 &&
+                tw > title_max_w) {
+                // 収まらない分は末尾を省略する
+                std::string clipped = title;
+                while (!clipped.empty()) {
+                    clipped.pop_back();
+                    if (TTF_SizeUTF8(font_row, (clipped + "...").c_str(), &tw, &th) == 0 &&
+                        tw <= title_max_w) {
+                        clipped += "...";
+                        break;
+                    }
+                }
+                renderText(renderer_, font_row, clipped.c_str(), title_x, y,
+                           selected ? 210 : 140, selected ? 215 : 145,
+                           selected ? 235 : 170);
+            } else {
+                renderText(renderer_, font_row, title.c_str(), title_x, y,
+                           selected ? 210 : 140, selected ? 215 : 145,
+                           selected ? 235 : 170);
+            }
+        }
+    }
+
+    // フッター: 選択中の曲名
+    const int footer_y = panel_y + panel_h - 26;
+    if (file_titles_ && file_titles_[filer_selection_] &&
+        file_titles_[filer_selection_][0]) {
+        const std::string title = sjisToUtf8(file_titles_[filer_selection_]);
+        renderText(renderer_, font_title, title.c_str(), panel_x + 20, footer_y,
+                   255, 230, 160);
+    } else {
+        renderText(renderer_, font_small_,
+                   pathBaseName(file_list_[filer_selection_]).c_str(),
+                   panel_x + 20, footer_y, 200, 200, 210);
     }
 }
 
