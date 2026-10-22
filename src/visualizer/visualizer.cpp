@@ -1062,13 +1062,14 @@ void Visualizer::renderPSF() {
         {180, 230, 120}, {255, 170, 150}, {150, 190, 255}, {240, 240, 160},
     };
 
-    // Per-row keyboard geometry (4 octaves, C2..C6).
-    const int low_note = 36;
-    const int octaves = 4;
-    const int white_w = 14;
-    const int white_h = 34;
-    const int black_w = 9;
-    const int black_h = 21;
+    // Per-row keyboard geometry: eight octaves like the SPC panel, but with
+    // thinner keys and a shorter height so it still fits a 52 px row.
+    const int low_note = 12;   // C0
+    const int octaves = 8;
+    const int white_w = 8;
+    const int white_h = 40;
+    const int black_w = 5;
+    const int black_h = 26;
     const int keyboard_w = octaves * 7 * white_w;
     static const int kWhiteSemis[7] = {0, 2, 4, 5, 7, 9, 11};
     static const int kBlackSemis[5] = {1, 3, 6, 8, 10};
@@ -1105,11 +1106,11 @@ void Visualizer::renderPSF() {
                          f.active ? 170 : 50, f.active ? 175 : 55,
                          f.active ? 220 : 80);
 
-        SDL_Rect bar = {x + label_x + 176, y + 7, 56, 8};
+        SDL_Rect bar = {x + label_x + 172, y + 7, 36, 8};
         SDL_SetRenderDrawColor(renderer_, 28, 28, 55, 255);
         SDL_RenderFillRect(renderer_, &bar);
-        int w = (f.envelope * 56) / 0x7FFF;
-        if (w > 56) w = 56;
+        int w = (f.envelope * 36) / 0x7FFF;
+        if (w > 36) w = 36;
         if (w > 0 && f.active) {
             bar.w = w;
             SDL_SetRenderDrawColor(renderer_, colr[0], colr[1], colr[2], 255);
@@ -1119,14 +1120,14 @@ void Visualizer::renderPSF() {
         if (f.note > 0) {
             const int octave = f.note / 12 - 1;
             snprintf(text, sizeof(text), "%s%d", getNoteName(f.note), octave);
-            renderBitmapText(text, x + label_x + 242, y + 4,
+            renderBitmapText(text, x + label_x + 216, y + 4,
                              f.active ? 200 : 60, f.active ? 230 : 70,
                              f.active ? 200 : 80);
         }
 
         // Per-voice keyboard.
-        const int keyboard_x = x + label_x + 300;
-        const int keyboard_y = y + 12;
+        const int keyboard_x = x + label_x + 248;
+        const int keyboard_y = y + 6;
         int key_x = -1;
         int white_index = 0;
         for (int o = 0; o < octaves; o++) {

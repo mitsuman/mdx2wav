@@ -88,7 +88,8 @@ PlayStation BIOS image, which cannot be bundled: pass one with
 
 The PSF panel shows the 24 SPU voices in two columns (12 + 12).  Each row has
 the voice's pitch, L/R volume, envelope and note packed on the left, followed
-by its own four-octave keyboard (C2..C6) with the playing key highlighted.
+by its own eight-octave keyboard (C0..C7): the SPC keyboard's density in a
+shorter, compressed row, with the playing key highlighted.
 Notes are derived from the pitch register and the decoded VAG sample's own
 tuning, so they are absolute rather than guessed from the mix.  Only PSF1 is supported (PSF2 would need a
 PS2 emulator), and the web build does not include the PSF core yet.
