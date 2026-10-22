@@ -39,9 +39,15 @@ static void audioCallback(void *userData, AudioQueueRef queue, AudioQueueBufferR
   }
   
   if (len <= 0) {
-    ctx->terminated = true;
-    pthread_cond_signal(&ctx->cond);
-    return;
+    if (!g_continuous_playback) {
+      ctx->terminated = true;
+      pthread_cond_signal(&ctx->cond);
+      return;
+    }
+    // Visualizer playback stays alive after the song ends: feed silence so the
+    // queue keeps running and a restart or file switch can fill it again.
+    memset(audio_buf, 0, (size_t)ctx->buffer_samples * 4);
+    len = ctx->buffer_samples;
   }
   
   // Copy to shared buffer for visualizer

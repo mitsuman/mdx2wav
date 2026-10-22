@@ -1243,10 +1243,10 @@ reload_file:
         pthread_mutex_unlock(&audioCtx.buffer_mutex);
       }
 
-      // The SPC player has a defined duration (ID666 or -d), so stop when its
-      // callback finishes even with the visualizer.  MDX visualizer playback
-      // stays continuous as before.
-      if (!enable_visualizer || is_spc || is_psf)
+      // With -g -p the visualizer keeps running after the song ends, so the
+      // user can restart or pick another file; only plain -p playback (and
+      // the video path, which does not reach here) stops on termination.
+      if (!enable_visualizer)
 #endif
       {
         if (audioCtx.terminated) {
