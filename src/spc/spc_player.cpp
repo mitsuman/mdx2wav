@@ -78,7 +78,7 @@ int FindBRREnd(const uint8_t* ram, int start) {
 // second or third harmonic is louder than the fundamental.  Returns 0 for
 // silence and unpitched material such as drums or noise.
 float EstimateSampleTune(const int16_t* samples, int count) {
-  if (!samples || count < 64) return 0.0f;
+  if (!samples || count < 16) return 0.0f;
   const double kPi = 3.14159265358979323846;
   const int n = 4096;
   const int fft_n = n;
@@ -88,7 +88,7 @@ float EstimateSampleTune(const int16_t* samples, int count) {
     mean += samples[i];
     energy += (double)samples[i] * samples[i];
   }
-  if (energy < 1e6) return 0.0f;
+  if (energy < 1e6) return 0.0f;  // effectively silent
   mean /= count;
 
   std::vector<float> re(fft_n, 0.0f), im(fft_n, 0.0f);
@@ -105,7 +105,7 @@ float EstimateSampleTune(const int16_t* samples, int count) {
   const double bin_hz = 32000.0 / fft_n;
   double best_score = 0.0;
   double best_freq = 0.0;
-  for (double f = 30.0; f <= 1200.0; f += 0.5) {
+  for (double f = 30.0; f <= 3000.0; f += 0.5) {
     double score = 0.0;
     for (int h = 1; h <= 8; h++) {
       const double fh = f * h;
@@ -193,7 +193,7 @@ float SampleTuneFromBRR(const uint8_t* ram, int dir, int srcn) {
     if (header & 0x01) ended = true;  // end flag
     if (decoded.size() >= 4096) break;
   }
-  if (decoded.size() < 64) return 0.0f;
+  if (decoded.size() < 16) return 0.0f;
   return EstimateSampleTune(decoded.data(), (int)decoded.size());
 }
 
