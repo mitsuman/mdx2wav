@@ -2747,6 +2747,15 @@ void Visualizer::renderKeyboard() {
         }
         if (key_on_edge) dominant_phase = 1;
 
+        // MDX keeps the key drawn while the operators are still releasing,
+        // even though the channel itself has been keyed off.
+        bool key_visible = channel.key_on;
+        if (!spc_mode_) {
+            for (int op = 0; op < 4; op++) {
+                if (channel.operators[op].eg_phase == 4) key_visible = true;
+            }
+        }
+
         // EGフェーズに応じた色を設定
         int r, g, b;
         switch (dominant_phase) {
@@ -2808,7 +2817,7 @@ void Visualizer::renderKeyboard() {
                 
                 SDL_Rect key_rect = {x, base_y, white_key_width - 1, white_key_height-2};
                 
-                bool pressed = channel.key_on && keyboard_note > 0 &&
+                bool pressed = key_visible && keyboard_note > 0 &&
                                (keyboard_note == midi_note);
                 
                 if (pressed) {
@@ -2862,7 +2871,7 @@ void Visualizer::renderKeyboard() {
                 
                 SDL_Rect key_rect = {x, base_y, black_key_width, black_key_height};
                 
-                bool pressed = channel.key_on && (keyboard_note == midi_note);
+                bool pressed = key_visible && (keyboard_note == midi_note);
                 
                 if (pressed) {
                     SDL_SetRenderDrawColor(renderer_, r, g, b, 255);
