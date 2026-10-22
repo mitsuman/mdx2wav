@@ -1268,9 +1268,10 @@ void Visualizer::renderPSF() {
         renderBitmapText("PS1", x + label_x, y + 31, seg_r / 2, seg_g / 2, seg_b / 2);
 
         // Vertical colour bar keyed by the sample start address, like the MDX
-        // channel bar.
+        // channel bar.  The waveform uses the same colour so the sample type
+        // is easy to follow.
+        int sr = 100, sg = 110, sb = 150;
         if (f.start_address > 0) {
-            int sr, sg, sb;
             getSampleColor(f.start_address, sr, sg, sb);
             SDL_Rect ch_bar = {x + label_x + 24, y + 4, 8, row_h - 8};
             SDL_SetRenderDrawColor(renderer_, f.active ? sr : sr / 3,
@@ -1466,7 +1467,7 @@ void Visualizer::renderPSF() {
                 }
                 const float scale = (wave_h * 0.45f) / (float)peak;
                 const int mid = y + wave_y_off + wave_h / 2;
-                SDL_SetRenderDrawColor(renderer_, pr, pg, pb, 220);
+                SDL_SetRenderDrawColor(renderer_, sr, sg, sb, 220);
                 int prev_y = mid;
                 for (int px = 1; px < wave_w - 1; px++) {
                     const int idx = (int)((long long)px * n / (wave_w - 2));

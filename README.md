@@ -107,7 +107,8 @@ number like the MDX/SPC panels, then PIT with VOL underneath (with an L/R pan ba
 the level meter and the playback position, followed by the voice's own
 eight-octave keyboard (same key width as SPC, with octave numbers under the C
 keys) and a 256 px captured-waveform panel like the SPC layout (the same 32 ms
-window: 1411 samples at 44.1 kHz).  The waveform is sniffed at the mix point,
+window: 1411 samples at 44.1 kHz), drawn in the same colour as the sample bar
+so the sample type is easy to follow.  The waveform is sniffed at the mix point,
 after the S-DSP-style envelope and voice volume, so it is the voice's actual
 contribution to the output.  The envelope
 phase (ATK/DEC/SUS/REL) is shown at the bottom-left of each row, coloured like
