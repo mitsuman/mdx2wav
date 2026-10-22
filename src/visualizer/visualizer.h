@@ -138,6 +138,8 @@ public:
         int current_address;
         int sample_start;
         int sample_end;
+        int16_t waveform[1024];
+        int waveform_samples;
     };
     void setPSFMode(bool enabled);
     bool isPSFMode() const { return psf_mode_; }

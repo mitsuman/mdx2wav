@@ -150,6 +150,13 @@ uint32 EMU_CALL spu_getreg_voice(void *state, uint32 voice, uint32 n) {
 uint32 EMU_CALL spu_getreg_main(void *state, uint32 n) {
   return spucore_getreg(CORESTATE(0), n);
 }
+int16_t const* EMU_CALL spu_dbg_waveform(void *state, uint32 voice) {
+  return spucore_dbg_waveform(CORESTATE(0), voice);
+}
+uint32 EMU_CALL spu_dbg_wave_pos(void *state, uint32 voice) {
+  return spucore_dbg_wave_pos(CORESTATE(0), voice);
+}
+
 uint32 EMU_CALL spu_getreg_flag(void *state, uint32 n) {
   return (uint32)spucore_getflag(CORESTATE(0), n);
 }

@@ -29,6 +29,10 @@ uint32 EMU_CALL spu_getreg_main(void *state, uint32 n);
 uint32 EMU_CALL spu_getreg_flag(void *state, uint32 n);
 /* Pointer to the 512 KB SPU RAM (16-bit words). */
 uint16* EMU_CALL spu_get_ram(void *state);
+
+/* Per-voice captured output (ring buffer of 2048 samples). */
+int16_t const* EMU_CALL spu_dbg_waveform(void *state, uint32 voice);
+uint32 EMU_CALL spu_dbg_wave_pos(void *state, uint32 voice);
 void   EMU_CALL spu_sh(void *state, uint32 a, uint16 d);
 
 void   EMU_CALL spu_dma(void *state, uint32 core, void *mem, uint32 mem_ofs, uint32 mem_mask, uint32 bytes, int iswrite);

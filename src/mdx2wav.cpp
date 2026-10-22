@@ -718,7 +718,7 @@ int main(int argc, char **argv) {
       adpcm_channels = 0;
     }
     int window_height = is_psf
-        ? 540
+        ? 720
         : (is_spc ? 720
                   : 75 + (ym2151_channels * 70) + (adpcm_channels * 45) + 20);
 
@@ -1088,6 +1088,8 @@ reload_file:
             out[vi].start_address = pv[vi].start_address;
             out[vi].loop_address = pv[vi].loop_address;
             out[vi].current_address = pv[vi].current_address;
+            for (int wi = 0; wi < 1024; wi++) out[vi].waveform[wi] = pv[vi].waveform[wi];
+            out[vi].waveform_samples = pv[vi].waveform_samples;
             out[vi].sample_start = pv[vi].sample_start;
             out[vi].sample_end = pv[vi].sample_end_address;
           }

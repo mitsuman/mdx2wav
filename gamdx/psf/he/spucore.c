@@ -396,6 +396,10 @@ struct SPUCORE_STATE {
   uint32 noiseclock;
   uint32 noisecounter;
   sint32 noiseval;
+
+  // Per-voice output capture for the visualizer (added for mdx2wav).
+  sint16 dbg_wave[24][2048];
+  uint32 dbg_wave_pos[24];
   uint32 irq_decoder_clock;
   uint32 irq_triggered_cycle;
 };
@@ -1751,6 +1755,17 @@ static void EMU_CALL render(struct SPUCORE_STATE *state, uint16 *ram, sint16 *bu
     for(i = 0; i < r; i++) {
       sint32 q_l = (v_l * ibuf[i]) >> 16;
       sint32 q_r = (v_r * ibuf[i]) >> 16;
+      {
+        // Keep the channel with the larger magnitude so panned or
+        // phase-inverted voices are still visible.
+        sint32 amp = q_l < 0 ? -q_l : q_l;
+        sint32 ampr = q_r < 0 ? -q_r : q_r;
+        if (ampr > amp) amp = q_r;
+        else amp = q_l;
+        if (amp > 32767) amp = 32767;
+        if (amp < -32768) amp = -32768;
+        state->dbg_wave[ch][state->dbg_wave_pos[ch]++ & 2047] = (sint16)amp;
+      }
       if(main_l) ibufmix[2*i+0] += q_l;
       if(main_r) ibufmix[2*i+1] += q_r;
       if(verb_l) ibufrvb[2*i+0] += q_l;
@@ -2056,6 +2071,13 @@ void EMU_CALL spucore_setreg(void *state, uint32 n, uint32 value, uint32 mask) {
 /*
 ** Voice register get/set
 */
+
+int16_t const* EMU_CALL spucore_dbg_waveform(void *state, uint32 voice) {
+  return SPUCORESTATE->dbg_wave[voice & 23];
+}
+uint32 EMU_CALL spucore_dbg_wave_pos(void *state, uint32 voice) {
+  return SPUCORESTATE->dbg_wave_pos[voice & 23];
+}
 
 uint32 EMU_CALL spucore_getreg_voice(void *state, uint32 voice, uint32 n) {
   switch(n) {

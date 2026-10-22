@@ -570,6 +570,18 @@ void PSFPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
     s.active = s.envelope > 0 || (kon & (1u << v)) != 0;
     s.waveform_samples = 0;
 
+    if (s.active) {
+      // Copy the captured per-voice output (the actual level used in the mix).
+      const int ring_size = 2048;
+      const int16_t* ring = spu_dbg_waveform(spu, (uint32)v);
+      const uint32 pos = spu_dbg_wave_pos(spu, (uint32)v);
+      const int count = std::min((int)kWaveformSamples, ring_size);
+      for (int j = 0; j < count; j++) {
+        s.waveform[j] = ring[(pos - count + j + ring_size) & (ring_size - 1)];
+      }
+      s.waveform_samples = count;
+    }
+
     // Note = the sample's own note (at pitch 0x1000) plus the pitch register.
     if (s.active && s.pitch > 0 && s.start_address > 0) {
       auto it = sample_tunes_.find(s.start_address);

@@ -1063,61 +1063,64 @@ void Visualizer::updatePSFState(const PSFVoice* voices, int count,
     psf_reverb_ = reverb;
 }
 
-// PSF (PlayStation SPU) panel: 24 voices in two columns of 12.  The voice
-// number uses the same 7-segment look as the MDX/SPC panels, PIT and VOL are
-// stacked, and every row carries an eight-octave keyboard whose playing key is
-// coloured by the SPU envelope state (green attack, orange decay, blue
-// sustain, purple release) exactly like the SPC keyboard.
+// PSF (PlayStation SPU) panel: 16 stacked voices, each with the SPC-style
+// 7-segment number, status, level meter, playback position, keyboard and the
+// captured per-voice waveform.  Voices 16..23 are only listed in the header.
 void Visualizer::renderPSF() {
-    const int col_w = window_width_ / 2;
-    const int row_h = 52;
+    const int row_h = 40;
     const int start_y = 66;
-    const int label_x = 10;
+    const int label_x = 8;
 
-    char text[128];
+    char text[160];
     snprintf(text, sizeof(text),
              "PLAYSTATION / SPU 16 VOICES   MVOLL %02X  MVOLR %02X  REVERB %s",
              psf_master_left_ & 0xFF, psf_master_right_ & 0xFF,
              psf_reverb_ ? "ON" : "OFF");
-    renderBitmapText(text, label_x, start_y - 20, 120, 160, 220);
+    renderBitmapText(text, label_x, start_y - 16, 120, 160, 220);
 
-    // Keyboard geometry: eight octaves with the SPC panel's key density,
-    // compressed into the 52 px row.
+    // Voices 16..23 live in the header line, next to the global SPU state.
+    {
+        int info_x = 640;
+        renderBitmapText("SPU 16-23:", info_x, start_y - 16, 100, 120, 170);
+        info_x += 66;
+        int shown = 0;
+        for (int v = 16; v < 24 && v < psf_voice_count_; v++) {
+            const PSFVoice& f = psf_voices_[v];
+            if (!f.active || f.note <= 0) continue;
+            int r, g, b;
+            getEGPhaseColor(f.phase, r, g, b);
+            snprintf(text, sizeof(text), "V%02d %s%d", v, getNoteName(f.note),
+                     f.note / 12 - 1);
+            renderBitmapText(text, info_x, start_y - 16, r, g, b);
+            info_x += 70;
+            if (++shown >= 10) break;
+        }
+        if (shown == 0) renderBitmapText("--", info_x, start_y - 16, 60, 70, 100);
+    }
+
     const int low_note = 12;   // C0
     const int octaves = 8;
-    const int white_w = 8;
-    const int white_h = 40;
-    const int black_w = 5;
-    const int black_h = 26;
+    // Same key width as the SPC panel (10 px white / 6 px black), squashed
+    // vertically to fit the 40 px rows.
+    const int white_w = 10;
+    const int white_h = 30;
+    const int black_w = 6;
+    const int black_h = 20;
     const int keyboard_dx = 230;
+    const int wave_x = 800;
+    const int wave_w = 560;
+    const int wave_h = 30;
     static const int kWhiteSemis[7] = {0, 2, 4, 5, 7, 9, 11};
     static const int kBlackSemis[5] = {1, 3, 6, 8, 10};
     static const int kBlackOffsets[5] = {0, 1, 3, 4, 5};
 
-    // FF7 (and most PSF sets) use 16 voices; the other eight are only listed
-    // as notes at the bottom in case a driver does use them.
     for (int v = 0; v < 16; v++) {
         const PSFVoice& f = psf_voices_[v];
-        const int col = v / 8;
-        const int row = v % 8;
-        const int x = col * col_w;
-        const int y = start_y + row * row_h;
-
-        // Attack and release can be shorter than one frame on the SPU, so
-        // hold those colours briefly; without it the key would only ever show
-        // the sustain colour.
-        const double now_phase = SDL_GetTicks() / 1000.0;
-        int phase = f.active ? f.phase : 0;
-        if (phase == 1 || phase == 4) {
-            psf_phase_hold_[v] = phase;
-            psf_phase_until_[v] = now_phase + 0.25;
-        } else if (now_phase < psf_phase_until_[v] &&
-                   (phase == 0 || phase == 3)) {
-            phase = psf_phase_hold_[v];
-        }
+        const int y = start_y + v * row_h;
+        const int x = 0;
 
         int pr = 60, pg = 60, pb = 80;
-        getEGPhaseColor(phase, pr, pg, pb);
+        getEGPhaseColor(f.active ? f.phase : 0, pr, pg, pb);
 
         // The key position is fixed at note-on; later pitch changes only move
         // the green dot, exactly like the SPC keyboard.
@@ -1128,46 +1131,43 @@ void Visualizer::renderPSF() {
         }
         const int latched = psf_latched_note_[v];
 
-        // Voice number, 7-segment style, in the same orange as the SPC panel.
+        // 7-segment voice number, in the SPC orange.
         const int seg_r = f.active ? CHANNEL_LABEL_COLOR_ACTIVE_R
                                    : CHANNEL_LABEL_COLOR_INACTIVE_R;
         const int seg_g = f.active ? CHANNEL_LABEL_COLOR_ACTIVE_G
                                    : CHANNEL_LABEL_COLOR_INACTIVE_G;
         const int seg_b = f.active ? CHANNEL_LABEL_COLOR_ACTIVE_B
                                    : CHANNEL_LABEL_COLOR_INACTIVE_B;
-        draw7Segment(x + label_x, y + 10, v / 10, seg_r, seg_g, seg_b, 8, 7);
-        draw7Segment(x + label_x + 11, y + 10, v % 10, seg_r, seg_g, seg_b, 8, 7);
-        renderBitmapText("SPU", x + label_x - 1, y + 31, seg_r, seg_g, seg_b);
-        renderBitmapText("PS1", x + label_x - 1, y + 39, seg_r / 2, seg_g / 2, seg_b / 2);
+        draw7Segment(x + label_x, y + 5, v / 10, seg_r, seg_g, seg_b, 6, 5);
+        draw7Segment(x + label_x + 7, y + 5, v % 10, seg_r, seg_g, seg_b, 6, 5);
+        renderBitmapText("SPU", x + label_x, y + 20, seg_r, seg_g, seg_b);
+        renderBitmapText("PS1", x + label_x, y + 27, seg_r / 2, seg_g / 2, seg_b / 2);
 
-        // PIT on the first line, VOL underneath.
         snprintf(text, sizeof(text), "PIT %04X", f.pitch & 0x3FFF);
-        renderBitmapText(text, x + label_x + 30, y + 6,
+        renderBitmapText(text, x + label_x + 26, y + 4,
                          f.active ? 120 : 55, f.active ? 200 : 70,
                          f.active ? 255 : 95);
 
         if (f.note > 0) {
             const int octave = f.note / 12 - 1;
             snprintf(text, sizeof(text), "%s%d", getNoteName(f.note), octave);
-            renderBitmapText(text, x + label_x + 110, y + 6,
+            renderBitmapText(text, x + label_x + 88, y + 4,
                              f.active ? 200 : 60, f.active ? 230 : 70,
                              f.active ? 200 : 80);
         }
 
-        // Volume registers, shown on the 0..0x7FFF register scale.
         snprintf(text, sizeof(text), "VOL %04X %04X",
                  (f.volume_left >> 1) & 0x7FFF, (f.volume_right >> 1) & 0x7FFF);
-        renderBitmapText(text, x + label_x + 30, y + 18,
+        renderBitmapText(text, x + label_x + 26, y + 14,
                          f.active ? 170 : 50, f.active ? 175 : 55,
                          f.active ? 220 : 80);
 
-        // Level meter: the bar is the voice volume, and the bright part is the
-        // level actually used when synthesising (volume x ADSR envelope).
+        // Level meter: bar = voice volume, bright part = applied level.
         {
-            const int meter_x = x + label_x + 130;
-            const int meter_y = y + 16;
-            const int meter_w = 100;
-            const int meter_h = 9;
+            const int meter_x = x + label_x + 120;
+            const int meter_y = y + 12;
+            const int meter_w = 92;
+            const int meter_h = 7;
 
             SDL_Rect bg = {meter_x, meter_y, meter_w, meter_h};
             SDL_SetRenderDrawColor(renderer_, 24, 24, 48, 255);
@@ -1182,8 +1182,6 @@ void Visualizer::renderPSF() {
             if (env < 0) env = 0;
             if (env > 0x7FFF) env = 0x7FFF;
 
-            // Logarithmic scale (-60 dB ... 0 dB): the raw PS1 voice levels
-            // are only a few percent, so a linear bar would barely move.
             const float vol_norm = levelToMeter(vol);
             const float mix_norm =
                 levelToMeter((int)(((long long)vol * env) / 0x7FFF));
@@ -1199,14 +1197,12 @@ void Visualizer::renderPSF() {
                 }
             }
 
-            // Peak hold: keep the highest level for a second, then let the
-            // marker fall back slowly.
             const double now_s = SDL_GetTicks() / 1000.0;
             if (mix_norm >= psf_peak_[v]) {
                 psf_peak_[v] = mix_norm;
                 psf_peak_time_[v] = now_s;
             } else if (now_s - psf_peak_time_[v] > 1.0) {
-                psf_peak_[v] -= 0.02f;  // ~1.2/s at 60 fps
+                psf_peak_[v] -= 0.02f;
                 if (psf_peak_[v] < mix_norm) psf_peak_[v] = mix_norm;
             }
 
@@ -1229,13 +1225,11 @@ void Visualizer::renderPSF() {
             }
         }
 
-        // Sample playback position (like the SPC bar): the orange point
-        // follows the VAG block currently being played; the yellow tick is
-        // the loop point.
+        // Playback position within the VAG sample.
         if (f.active && f.sample_start > 0 && f.sample_end > f.sample_start) {
-            const int bar_x = x + label_x + 130;
-            const int bar_y = y + 31;
-            const int bar_w = 100;
+            const int bar_x = x + label_x + 120;
+            const int bar_y = y + 23;
+            const int bar_w = 92;
             const int bar_h = 4;
             const int start = f.sample_start;
             const int end = f.sample_end;
@@ -1252,8 +1246,7 @@ void Visualizer::renderPSF() {
                 SDL_SetRenderDrawColor(renderer_, 60, 70, 110, 255);
                 SDL_RenderDrawRect(renderer_, &bg);
 
-                SDL_SetRenderDrawColor(renderer_, f.active ? 255 : 150,
-                                       f.active ? 150 : 80, 0, 255);
+                SDL_SetRenderDrawColor(renderer_, 255, 150, 0, 255);
                 SDL_Rect point = {bar_x + 1 + played - 1, bar_y - 1, 3, bar_h + 2};
                 if (point.x < bar_x + 1) point.x = bar_x + 1;
                 if (point.x > bar_x + bar_w - 3) point.x = bar_x + bar_w - 3;
@@ -1269,8 +1262,8 @@ void Visualizer::renderPSF() {
             }
         }
 
-        // Per-voice keyboard.
-        const int keyboard_x = x + label_x + keyboard_dx;
+        // Keyboard.
+        const int keyboard_x = x + keyboard_dx;
         const int keyboard_y = y + 6;
         int white_index = 0;
         for (int o = 0; o < octaves; o++) {
@@ -1308,8 +1301,7 @@ void Visualizer::renderPSF() {
             }
         }
 
-        // Green dot above the key of the current pitch (the key itself stays
-        // at the note-on position).
+        // Green dot above the current pitch.
         if (f.active && f.note >= low_note && f.note < low_note + octaves * 12) {
             const int semis = f.note - low_note;
             const int o = semis / 12;
@@ -1332,31 +1324,40 @@ void Visualizer::renderPSF() {
             }
             if (kx >= 0) {
                 SDL_SetRenderDrawColor(renderer_, 100, 255, 100, 255);
-                SDL_Rect mark = {kx - 2, keyboard_y - 6, 5, 5};
+                SDL_Rect mark = {kx - 2, keyboard_y - 5, 5, 4};
                 SDL_RenderFillRect(renderer_, &mark);
             }
         }
-    }
 
-    // Voices 16..23 are not laid out, but note them when they play.
-    {
-        const int info_y = start_y + 8 * row_h + 12;
-        renderBitmapText("SPU 16-23:", label_x, info_y, 100, 120, 170);
-        int info_x = label_x + 80;
-        int shown = 0;
-        for (int v = 16; v < 24 && v < psf_voice_count_; v++) {
-            const PSFVoice& f = psf_voices_[v];
-            if (!f.active || f.note <= 0) continue;
-            int r, g, b;
-            getEGPhaseColor(f.phase, r, g, b);
-            snprintf(text, sizeof(text), "V%02d %s%d", v, getNoteName(f.note),
-                     f.note / 12 - 1);
-            renderBitmapText(text, info_x, info_y, r, g, b);
-            info_x += 78;
-            if (++shown >= 12) break;
-        }
-        if (shown == 0) {
-            renderBitmapText("--", info_x, info_y, 60, 70, 100);
+        // Captured per-voice waveform.
+        {
+            SDL_Rect area = {x + wave_x, y + 4, wave_w, wave_h};
+            SDL_SetRenderDrawColor(renderer_, 12, 12, 34, 255);
+            SDL_RenderFillRect(renderer_, &area);
+            SDL_SetRenderDrawColor(renderer_, 45, 50, 85, 255);
+            SDL_RenderDrawRect(renderer_, &area);
+
+            const int n = f.waveform_samples;
+            if (n > 1 && f.active) {
+                int peak = 1;
+                for (int i = 0; i < n; i++) {
+                    const int a = f.waveform[i] < 0 ? -f.waveform[i] : f.waveform[i];
+                    if (a > peak) peak = a;
+                }
+                const float scale = (wave_h * 0.45f) / (float)peak;
+                const int mid = y + 4 + wave_h / 2;
+                SDL_SetRenderDrawColor(renderer_, pr, pg, pb, 220);
+                int prev_y = mid;
+                for (int px = 1; px < wave_w - 1; px++) {
+                    const int idx = (int)((long long)px * n / (wave_w - 2));
+                    int py = mid - (int)(f.waveform[idx] * scale);
+                    if (py < y + 5) py = y + 5;
+                    if (py > y + 4 + wave_h - 2) py = y + 4 + wave_h - 2;
+                    SDL_RenderDrawLine(renderer_, x + wave_x + px - 1, prev_y,
+                                       x + wave_x + px, py);
+                    prev_y = py;
+                }
+            }
         }
     }
 }

@@ -24,6 +24,10 @@ void   EMU_CALL spucore_render(void *state, uint16 *ram, sint16 *buf, sint16 *ex
 uint32 EMU_CALL spucore_getreg      (void *state, uint32 n);
 void   EMU_CALL spucore_setreg      (void *state, uint32 n, uint32 value, uint32 mask);
 uint32 EMU_CALL spucore_getreg_voice(void *state, uint32 voice, uint32 n);
+
+/* Captured per-voice output (ring of 2048 samples) for the visualizer. */
+int16_t const* EMU_CALL spucore_dbg_waveform(void *state, uint32 voice);
+uint32 EMU_CALL spucore_dbg_wave_pos(void *state, uint32 voice);
 void   EMU_CALL spucore_setreg_voice(void *state, uint32 voice, uint32 n, uint32 value, uint32 mask);
 int    EMU_CALL spucore_getflag     (void *state, uint32 n);
 void   EMU_CALL spucore_setflag     (void *state, uint32 n, int value);
