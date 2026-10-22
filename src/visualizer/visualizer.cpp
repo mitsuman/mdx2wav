@@ -637,6 +637,9 @@ void Visualizer::update() {
                         if (parent.empty()) parent = "/";
                     }
                     if (parent != filer_directory_) {
+                        // Remember where we came from so the cursor lands on
+                        // that directory in the parent listing.
+                        pending_selection_ = filer_directory_;
                         requested_directory_ = parent;
                         dir_change_requested_ = true;
                     }
@@ -1116,6 +1119,22 @@ void Visualizer::ensureHistoryVisible() {
 
 void Visualizer::setDirectory(const char* path) {
     filer_directory_ = path ? path : "";
+}
+
+void Visualizer::applyPendingSelection() {
+    if (pending_selection_.empty()) return;
+    const std::string want = pending_selection_;
+    pending_selection_.clear();
+    for (int i = 0; i < file_list_count_; i++) {
+        if (!file_list_[i]) continue;
+        std::string path = file_list_[i];
+        while (path.size() > 1 && path.back() == '/') path.pop_back();
+        if (path == want) {
+            filer_selection_ = i;
+            ensureFilerSelectionVisible();
+            return;
+        }
+    }
 }
 
 int Visualizer::stepFileIndex(int from, int step) const {

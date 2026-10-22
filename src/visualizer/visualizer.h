@@ -126,6 +126,9 @@ public:
 
     // Directory currently shown by the filer.
     void setDirectory(const char* path);
+    // After a directory change, put the cursor on this path (e.g. the child
+    // directory we just came from).
+    void applyPendingSelection();
     bool hasDirectoryChangeRequest() const { return dir_change_requested_; }
     const std::string& getRequestedDirectory() const { return requested_directory_; }
     void clearDirectoryChangeRequest() { dir_change_requested_ = false; }
@@ -300,6 +303,7 @@ private:
     std::string filer_directory_;
     bool dir_change_requested_;
     std::string requested_directory_;
+    std::string pending_selection_;
     int file_list_count_;
     int current_file_index_;
     bool filer_mode_;

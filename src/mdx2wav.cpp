@@ -1292,6 +1292,7 @@ reload_file:
           visualizer->setFileList(file_ptrs.data(), title_ptrs.data(),
                                   file_dirs.data(), (int)file_ptrs.size(), 0);
           visualizer->setDirectory(music_dir.c_str());
+          visualizer->applyPendingSelection();
           current_file_index = 0;
         }
 
