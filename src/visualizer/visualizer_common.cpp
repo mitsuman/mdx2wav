@@ -324,9 +324,11 @@ void Visualizer::getEGPhaseColor(int phase, int& r, int& g, int& b) {
 }
 
 // ノート名を取得
+// 音名は常に3文字（音名＋シャープ、またはナチュラルは "-"）にして、
+// オクターブと続く "(nn)" が音名によってずれないようにする。
 const char* Visualizer::getNoteName(int note) {
     static const char* note_names[] = {
-        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
+        "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"
     };
     return note_names[note % 12];
 }
