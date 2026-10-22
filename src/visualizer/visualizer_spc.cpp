@@ -139,23 +139,18 @@ void Visualizer::renderSPCChannelInfo() {
       SDL_SetRenderDrawColor(renderer_, 60, 70, 110, 255);
       SDL_RenderDrawRect(renderer_, &bg);
 
-      if (played > 0) {
-        SDL_SetRenderDrawColor(renderer_, r, g, b, active ? 230 : 90);
-        SDL_Rect fill = {bar_x + 1, bar_y + 1, played, bar_h - 2};
-        SDL_RenderFillRect(renderer_, &fill);
-      }
+      // Only the playback point, in orange.  No filled level-meter bar.
+      SDL_SetRenderDrawColor(renderer_, active ? 255 : 150,
+                             active ? 150 : 80, 0, 255);
+      SDL_Rect point = {bar_x + 1 + played - 1, bar_y - 1, 3, bar_h + 2};
+      SDL_RenderFillRect(renderer_, &point);
 
-      // Loop point tick.
+      // Loop point tick, drawn last so it stays visible at the loop instant.
       if (c.spc_loop >= start && c.spc_loop <= end) {
         const int loop_x = bar_x + 1 + (c.spc_loop - start) * (bar_w - 2) / span;
-        SDL_SetRenderDrawColor(renderer_, 255, 220, 120, 220);
-        SDL_RenderDrawLine(renderer_, loop_x, bar_y, loop_x, bar_y + bar_h - 1);
+        SDL_SetRenderDrawColor(renderer_, 255, 220, 120, 230);
+        SDL_RenderDrawLine(renderer_, loop_x, bar_y - 1, loop_x, bar_y + bar_h);
       }
-
-      // Current position marker.
-      SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 255);
-      SDL_RenderDrawLine(renderer_, bar_x + 1 + played, bar_y,
-                         bar_x + 1 + played, bar_y + bar_h - 1);
     }
 
     // Actual generated output for this voice, captured from the S-DSP.

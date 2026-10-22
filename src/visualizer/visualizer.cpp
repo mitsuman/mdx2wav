@@ -2130,6 +2130,13 @@ void Visualizer::renderKeyboard() {
                 SDL_RenderFillRect(renderer_, &key_rect);
                 SDL_SetRenderDrawColor(renderer_, 60, 60, 120, 255);
                 SDL_RenderDrawRect(renderer_, &key_rect);
+
+                // Green pitch dot above the matching key.
+                if (channel.key_on && channel.note > 0 && channel.note == midi_note) {
+                    SDL_SetRenderDrawColor(renderer_, 100, 255, 100, 255);
+                    SDL_Rect dot = {x + white_key_width / 2 - 2, base_y - 6, 5, 5};
+                    SDL_RenderFillRect(renderer_, &dot);
+                }
                 
                 // C音にオクターブ番号を表示
                 if (note == 0) {
@@ -2166,6 +2173,12 @@ void Visualizer::renderKeyboard() {
                 SDL_RenderFillRect(renderer_, &key_rect);
                 SDL_SetRenderDrawColor(renderer_, 60, 60, 120, 255);
                 SDL_RenderDrawRect(renderer_, &key_rect);
+
+                if (channel.key_on && channel.note > 0 && channel.note == midi_note) {
+                    SDL_SetRenderDrawColor(renderer_, 100, 255, 100, 255);
+                    SDL_Rect dot = {x + black_key_width / 2 - 2, base_y - 6, 5, 5};
+                    SDL_RenderFillRect(renderer_, &dot);
+                }
             }
             white_key_index += 7;
         }
