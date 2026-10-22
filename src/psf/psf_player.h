@@ -113,6 +113,8 @@ class PSFPlayer {
   mutable std::map<int, float> sample_tunes_;  // sample start address -> note
   mutable std::map<int, int> sample_ends_;     // start address -> end address
   mutable uint32_t key_on_seen_[kVoices];      // last KON counter seen
+  mutable uint32_t last_wave_pos_[kVoices];    // waveform ring position seen
+  mutable int wave_stall_[kVoices];            // frames without new samples
 };
 
 #endif  // PSF_PLAYER_H

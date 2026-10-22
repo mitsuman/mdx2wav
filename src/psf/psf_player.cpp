@@ -242,7 +242,11 @@ PSFPlayer::PSFPlayer()
       elapsed_(0.0),
       tag_seconds_(0.0),
       tag_fade_(0.0) {
-  for (int i = 0; i < kVoices; i++) key_on_seen_[i] = 0;
+  for (int i = 0; i < kVoices; i++) {
+    key_on_seen_[i] = 0;
+    last_wave_pos_[i] = 0;
+    wave_stall_[i] = 0;
+  }
 }
 
 PSFPlayer::~PSFPlayer() {
@@ -567,7 +571,9 @@ void PSFPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
       s.sample_start = start;
       s.sample_end_address = end;
     }
-    s.active = s.envelope > 0 || (kon & (1u << v)) != 0;
+    // The KON register bits stay set after a voice finishes, and ENVX drops to
+    // 0 while a quiet release is still running, so use the envelope state.
+    s.active = s.phase != 0;
     s.waveform_samples = 0;
 
     if (s.active) {
@@ -580,6 +586,21 @@ void PSFPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
         s.waveform[j] = ring[(pos - count + j + ring_size) & (ring_size - 1)];
       }
       s.waveform_samples = count;
+      // A voice that no longer feeds the mix (muted, finished or still
+      // deferred) would otherwise show the last window forever.
+      if (pos == last_wave_pos_[v]) {
+        wave_stall_[v]++;
+      } else {
+        last_wave_pos_[v] = pos;
+        wave_stall_[v] = 0;
+      }
+      if (wave_stall_[v] >= 4) {
+        // The voice no longer produces samples (its sample ended or it is not
+        // routed), so stop showing it as playing even if the envelope is still
+        // decaying.
+        s.waveform_samples = 0;
+        s.active = false;
+      }
     }
 
     // Note = the sample's own note (at pitch 0x1000) plus the pitch register.
@@ -604,6 +625,7 @@ void PSFPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
       }
     }
   }
+
 }
 
 void PSFPlayer::GetGlobalState(GlobalState* out) const {
