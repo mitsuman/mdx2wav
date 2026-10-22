@@ -1163,7 +1163,8 @@ void Visualizer::renderPSF() {
     // Same waveform panel size as the SPC layout (256 x ~40).
     const int wave_x = 800;
     const int wave_w = 256;
-    const int wave_h = 40;
+    const int wave_y_off = 1;
+    const int wave_h = 46;  // almost the full 48 px row
     static const int kWhiteSemis[7] = {0, 2, 4, 5, 7, 9, 11};
     static const int kBlackSemis[5] = {1, 3, 6, 8, 10};
     static const int kBlackOffsets[5] = {0, 1, 3, 4, 5};
@@ -1326,7 +1327,7 @@ void Visualizer::renderPSF() {
 
         // Captured per-voice waveform.
         {
-            SDL_Rect area = {x + wave_x, y + 4, wave_w, wave_h};
+            SDL_Rect area = {x + wave_x, y + wave_y_off, wave_w, wave_h};
             SDL_SetRenderDrawColor(renderer_, 12, 12, 34, 255);
             SDL_RenderFillRect(renderer_, &area);
             SDL_SetRenderDrawColor(renderer_, 45, 50, 85, 255);
@@ -1340,14 +1341,16 @@ void Visualizer::renderPSF() {
                     if (a > peak) peak = a;
                 }
                 const float scale = (wave_h * 0.45f) / (float)peak;
-                const int mid = y + 4 + wave_h / 2;
+                const int mid = y + wave_y_off + wave_h / 2;
                 SDL_SetRenderDrawColor(renderer_, pr, pg, pb, 220);
                 int prev_y = mid;
                 for (int px = 1; px < wave_w - 1; px++) {
                     const int idx = (int)((long long)px * n / (wave_w - 2));
                     int py = mid - (int)(f.waveform[idx] * scale);
-                    if (py < y + 5) py = y + 5;
-                    if (py > y + 4 + wave_h - 2) py = y + 4 + wave_h - 2;
+                    if (py < y + wave_y_off + 1) py = y + wave_y_off + 1;
+                    if (py > y + wave_y_off + wave_h - 2) {
+                        py = y + wave_y_off + wave_h - 2;
+                    }
                     SDL_RenderDrawLine(renderer_, x + wave_x + px - 1, prev_y,
                                        x + wave_x + px, py);
                     prev_y = py;
