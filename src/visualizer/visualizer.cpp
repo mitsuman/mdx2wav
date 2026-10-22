@@ -1118,7 +1118,7 @@ void Visualizer::updatePSFState(const PSFVoice* voices, int count,
 // 7-segment number, status, level meter, playback position, keyboard and the
 // captured per-voice waveform.  Voices 16..23 are only listed in the header.
 void Visualizer::renderPSF() {
-    const int row_h = 40;
+    const int row_h = 48;
     const int start_y = 66;
     const int label_x = 8;
 
@@ -1154,13 +1154,14 @@ void Visualizer::renderPSF() {
     // Same key width as the SPC panel (10 px white / 6 px black), squashed
     // vertically to fit the 40 px rows.
     const int white_w = 10;
-    const int white_h = 30;
+    const int white_h = 32;
     const int black_w = 6;
-    const int black_h = 20;
+    const int black_h = 21;
     const int keyboard_dx = 230;
+    // Same waveform panel size as the SPC layout (256 x ~40).
     const int wave_x = 800;
-    const int wave_w = 560;
-    const int wave_h = 30;
+    const int wave_w = 256;
+    const int wave_h = 40;
     static const int kWhiteSemis[7] = {0, 2, 4, 5, 7, 9, 11};
     static const int kBlackSemis[5] = {1, 3, 6, 8, 10};
     static const int kBlackOffsets[5] = {0, 1, 3, 4, 5};
@@ -1189,10 +1190,10 @@ void Visualizer::renderPSF() {
                                    : CHANNEL_LABEL_COLOR_INACTIVE_G;
         const int seg_b = f.active ? CHANNEL_LABEL_COLOR_ACTIVE_B
                                    : CHANNEL_LABEL_COLOR_INACTIVE_B;
-        draw7Segment(x + label_x, y + 5, v / 10, seg_r, seg_g, seg_b, 6, 5);
-        draw7Segment(x + label_x + 7, y + 5, v % 10, seg_r, seg_g, seg_b, 6, 5);
-        renderBitmapText("SPU", x + label_x, y + 20, seg_r, seg_g, seg_b);
-        renderBitmapText("PS1", x + label_x, y + 27, seg_r / 2, seg_g / 2, seg_b / 2);
+        draw7Segment(x + label_x, y + 7, v / 10, seg_r, seg_g, seg_b, 6, 5);
+        draw7Segment(x + label_x + 7, y + 7, v % 10, seg_r, seg_g, seg_b, 6, 5);
+        renderBitmapText("SPU", x + label_x, y + 24, seg_r, seg_g, seg_b);
+        renderBitmapText("PS1", x + label_x, y + 31, seg_r / 2, seg_g / 2, seg_b / 2);
 
         snprintf(text, sizeof(text), "PIT %04X", f.pitch & 0x3FFF);
         renderBitmapText(text, x + label_x + 42, y + 4,
@@ -1235,7 +1236,7 @@ void Visualizer::renderPSF() {
                 if (psf_peak_[v] < mix_norm) psf_peak_[v] = mix_norm;
             }
 
-            drawMeterBar(x + label_x + 26, y + 4, 8, 30, true, mix_norm,
+            drawMeterBar(x + label_x + 26, y + 6, 8, 34, true, mix_norm,
                          psf_peak_[v], pr, pg, pb);
         }
 
@@ -1248,7 +1249,7 @@ void Visualizer::renderPSF() {
 
         // Keyboard.
         const int keyboard_x = x + keyboard_dx;
-        const int keyboard_y = y + 6;
+        const int keyboard_y = y + 5;
         int white_index = 0;
         for (int o = 0; o < octaves; o++) {
             for (int i = 0; i < 7; i++) {
@@ -1264,6 +1265,12 @@ void Visualizer::renderPSF() {
                 SDL_RenderFillRect(renderer_, &key);
                 SDL_SetRenderDrawColor(renderer_, 60, 65, 100, 255);
                 SDL_RenderDrawRect(renderer_, &key);
+                if (i == 0) {
+                    // Octave number under each C key, like the SPC keyboard.
+                    snprintf(text, sizeof(text), "%d", o);
+                    renderBitmapText(text, kx + 2, keyboard_y + white_h + 2,
+                                     90, 110, 170);
+                }
                 white_index++;
             }
         }

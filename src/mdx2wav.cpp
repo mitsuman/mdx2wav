@@ -754,9 +754,11 @@ int main(int argc, char **argv) {
       adpcm_channels = 0;
     }
     int window_height = is_psf
-        ? 720
+        ? 844
         : (is_spc ? 720
                   : 75 + (ym2151_channels * 70) + (adpcm_channels * 45) + 20);
+    // The PSF layout has no spectrum strip, so the window is narrower.
+    const int window_width = is_psf ? 1080 : 1400;
 
     // 動画モードの場合は高さを偶数に調整（H.264要件）
     if (video_filename && (window_height % 2) != 0) {
@@ -769,7 +771,7 @@ int main(int argc, char **argv) {
 
     if (video_filename) {
       // 動画録画モード
-      init_success = visualizer->initVideoMode(video_filename, 1400, window_height, video_fps, SAMPLE_RATE);
+      init_success = visualizer->initVideoMode(video_filename, window_width, window_height, video_fps, SAMPLE_RATE);
       if (!init_success) {
         fprintf(stderr, "Failed to initialize visualizer in video mode\n");
         delete visualizer;
@@ -781,7 +783,7 @@ int main(int argc, char **argv) {
       // 通常の表示モード
       init_success = visualizer->init(
           is_spc ? "SPC Visualizer" : (is_psf ? "PSF Visualizer" : "MDX Visualizer"),
-          1400, window_height);
+          window_width, window_height);
       if (!init_success) {
         fprintf(stderr, "Failed to initialize visualizer\n");
         delete visualizer;

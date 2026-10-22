@@ -87,11 +87,12 @@ PlayStation BIOS image, which cannot be bundled: pass one with
 `length` / `fade` tags, and `-t` prints the title.
 
 The PSF panel stacks the 16 voices that PSF sets normally use in a single
-column.  Each row starts with a 7-segment voice number like the MDX/SPC
-panels, then PIT with VOL underneath, the note, the level meter and the
-playback position, followed by the voice's own eight-octave keyboard (same key
-width as SPC) and the captured per-voice waveform.  Voices 16..23 are only
-listed as note names in the header, in case a driver uses them.  The rest of the row is the voice's
+column (48 px rows, 1080 x 844 window).  Each row starts with a 7-segment voice
+number like the MDX/SPC panels, then PIT with VOL underneath, the note, the
+level meter and the playback position, followed by the voice's own
+eight-octave keyboard (same key width as SPC, with octave numbers under the C
+keys) and a 256 px captured-waveform panel like the SPC layout.  Voices 16..23
+are only listed as note names in the header, in case a driver uses them.  The rest of the row is the voice's
 own eight-octave keyboard (C0..C7), as dense as the SPC keyboard but shorter,
 and the playing key is coloured by the SPU envelope state (green attack,
 orange decay, blue sustain, purple release), the same palette as SPC.  The
