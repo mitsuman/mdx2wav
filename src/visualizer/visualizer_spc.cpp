@@ -93,7 +93,10 @@ void Visualizer::renderSPCChannelInfo() {
 
     snprintf(text, sizeof(text), "SRC %04X", c.spc_source);
     renderBitmapText(text, 160, y + 18, 120, 150, 200);
-    snprintf(text, sizeof(text), "LOOP %04X", c.spc_loop);
+    // No space after LOOP: the label is four characters like "SRC " and
+    // "BRR ", so the hex digits line up vertically with the lines above and
+    // below it.
+    snprintf(text, sizeof(text), "LOOP%04X", c.spc_loop);
     renderBitmapText(text, 160, y + 30, 120, 150, 200);
     snprintf(text, sizeof(text), "BRR %04X", c.spc_brr);
     renderBitmapText(text, 160, y + 42, 90, 120, 180);
