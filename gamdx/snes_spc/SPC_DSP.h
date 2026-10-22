@@ -134,6 +134,11 @@ public:
 	int16_t const* dbg_waveform(int voice) const { return m.dbg_wave[voice]; }
 	int dbg_waveform_pos(int voice) const { return m.dbg_wave_pos[voice]; }
 
+	// Monotonic key-on counter per voice.  A voice can be retriggered without
+	// its envelope ever reaching zero, so the visualizer watches this counter
+	// instead of the envelope level to detect note-ons.
+	unsigned long dbg_key_on(int voice) const { return m.dbg_key_on[voice]; }
+
 private:
 	enum { brr_block_size = 9 };
 	
@@ -197,6 +202,7 @@ private:
 		int16_t dbg_wave [voice_count] [dbg_wave_size];
 		int dbg_wave_pos [voice_count];
 		int dbg_wave_last [voice_count];
+		unsigned long dbg_key_on [voice_count];
 		
 		// non-emulation state
 		uint8_t* ram; // 64K shared RAM between DSP and SMP

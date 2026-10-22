@@ -475,6 +475,7 @@ VOICE_CLOCK( V3c )
 		{
 			v->kon_delay = 5;
 			v->env_mode  = env_attack;
+			m.dbg_key_on [(int)(v - m.voices)]++;
 		}
 	}
 	
@@ -879,6 +880,7 @@ void SPC_DSP::load( uint8_t const regs [register_count] )
 	memset( m.dbg_wave, 0, sizeof m.dbg_wave );
 	memset( m.dbg_wave_pos, 0, sizeof m.dbg_wave_pos );
 	memset( m.dbg_wave_last, 0, sizeof m.dbg_wave_last );
+	memset( m.dbg_key_on, 0, sizeof m.dbg_key_on );
 	
 	// Internal state
 	for ( int i = voice_count; --i >= 0; )

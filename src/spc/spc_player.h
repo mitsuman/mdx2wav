@@ -28,6 +28,7 @@ class SPCPlayer {
 
   struct VoiceState {
     bool key_on;
+    bool note_on;        // a KON was processed since the last snapshot
     bool kon;
     int note;            // MIDI-style note from the pitch register + sample tune
     float pitch_note;    // continuous version of `note`
@@ -112,6 +113,7 @@ class SPCPlayer {
   bool GetSampleTune(const uint8_t* ram, int dir, int srcn, float* tune) const;
 
   mutable std::map<int, float> sample_tunes_;  // srcn -> note at 32 kHz
+  mutable unsigned long key_on_seen_[kVoices];  // last KON counter seen
 
   SNES_SPC* spc_;
   SPC_Filter* filter_;

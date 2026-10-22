@@ -211,6 +211,7 @@ SPCPlayer::SPCPlayer()
       fadeout_seconds_(0.0),
       elapsed_(0.0),
       id666_seconds_(0.0) {
+  for (int i = 0; i < kVoices; i++) key_on_seen_[i] = 0;
   spc_->init();
   raw_input_.resize(kInputFrames * 2);
 }
@@ -290,6 +291,7 @@ bool SPCPlayer::Load(const uint8_t* data, size_t size, std::string* error) {
   filter_->clear();
   resampler_.Reset();
   ClearSampleTunes();
+  for (int i = 0; i < kVoices; i++) key_on_seen_[i] = 0;
   ParseId666(data, size);
 
   loaded_ = true;
@@ -327,6 +329,7 @@ void SPCPlayer::Start(int loop, double max_duration, double fadeout_seconds) {
       finished_ = true;
     }
     spc_->clear_echo();
+    for (int i = 0; i < kVoices; i++) key_on_seen_[i] = 0;
   }
 
   resampler_.Init(SNES_SPC::sample_rate, sample_rate_);
@@ -437,6 +440,9 @@ void SPCPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
     const int max_vol = std::max(std::abs(voll), std::abs(volr));
 
     s.key_on = env > 0;
+    const unsigned long key_ons = dsp.dbg_key_on(i);
+    s.note_on = key_ons != key_on_seen_[i];
+    if (s.note_on) key_on_seen_[i] = key_ons;
     s.kon = (kon & (1 << i)) != 0;
     s.pitch = pitch;
     s.note = 0;  // filled in below from the pitch register + sample tuning

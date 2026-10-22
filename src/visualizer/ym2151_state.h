@@ -101,6 +101,7 @@ public:
         uint16_t spc_end;          // end of the BRR sample/loop
         uint8_t  spc_env_phase;    // 0 release, 1 attack, 2 decay, 3 sustain
         uint8_t  spc_kon;          // KON register bit
+        bool     spc_note_on;      // a KON was processed since the last update
         uint16_t spc_waveform_samples; // valid samples in channel_waveforms_
     };
 
@@ -172,7 +173,8 @@ public:
     // SPC visualization support
     void setSPCMode(bool enabled);
     bool isSPCMode() const { return spc_mode_; }
-    void updateSPCVoice(int ch, bool key_on, bool kon, int note, float pitch_note,
+    void updateSPCVoice(int ch, bool key_on, bool note_on, bool kon, int note,
+                        float pitch_note,
                         int volume, int left_volume, int right_volume, int pitch,
                         int envelope, int envelope_phase, int source_address,
                         int loop_address, int brr_address, int sample_end_address,

@@ -104,7 +104,6 @@ Visualizer::Visualizer()
         keyboard_octave_offset_[i] = 0;
         keyboard_offset_hold_until_s_[i] = 0.0;
         keyboard_latched_note_[i] = 0;
-        keyboard_key_on_prev_[i] = false;
     }
 
     // 前フレーム波形データの初期化
@@ -2027,14 +2026,19 @@ void Visualizer::renderKeyboard() {
         auto& channel = channels[ch];
 
         // The keyboard position is latched at note-on for SPC.  Pitch changes
-        // after that are shown by the green dot, not by moving the key.
+        // after that are shown by the green dot, not by moving the key.  A
+        // note-on is the DSP's KON event, not "the envelope went above zero":
+        // sustained voices are retriggered without ever releasing, so an
+        // envelope edge would leave the key stuck on the first note.
         if (spc_mode_) {
-            if (channel.key_on) {
-                if (!keyboard_key_on_prev_[ch] || keyboard_latched_note_[ch] == 0) {
-                    if (channel.note > 0) keyboard_latched_note_[ch] = channel.note;
-                }
+            if (channel.spc_note_on) {
+                keyboard_latched_note_[ch] = channel.note > 0 ? channel.note : 0;
+            } else if (keyboard_latched_note_[ch] == 0 && channel.key_on &&
+                       channel.note > 0) {
+                // The sample's tuning may not have been measured yet at the
+                // note-on frame; pick the note up as soon as it is known.
+                keyboard_latched_note_[ch] = channel.note;
             }
-            keyboard_key_on_prev_[ch] = channel.key_on;
         }
         const int keyboard_note = spc_mode_ ? keyboard_latched_note_[ch]
                                             : channel.note;

@@ -389,8 +389,8 @@ void YM2151State::setSPCMode(bool enabled) {
     pthread_mutex_unlock(&mutex_);
 }
 
-void YM2151State::updateSPCVoice(int ch, bool key_on, bool kon, int note,
-                                 float pitch_note, int volume,
+void YM2151State::updateSPCVoice(int ch, bool key_on, bool note_on, bool kon,
+                                 int note, float pitch_note, int volume,
                                  int left_volume, int right_volume, int pitch,
                                  int envelope, int envelope_phase, int source_address,
                                  int loop_address, int brr_address, int sample_end_address,
@@ -408,6 +408,7 @@ void YM2151State::updateSPCVoice(int ch, bool key_on, bool kon, int note,
     c.operator_mask = 1;
     c.spc_pitch = (uint16_t)(pitch & 0x3FFF);
     c.spc_pitch_note = pitch_note;
+    c.spc_note_on = note_on;
     c.spc_envelope = (uint16_t)(envelope & 0x7FF);
     c.spc_source = (uint16_t)source_address;
     c.spc_loop = (uint16_t)loop_address;
