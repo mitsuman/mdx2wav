@@ -582,6 +582,14 @@ void Visualizer::update() {
                 } else if (sym == SDLK_DOWN && n > 0) {
                     history_selection_ = (history_selection_ + 1) % n;
                     ensureHistoryVisible();
+                } else if (sym == SDLK_PAGEUP && n > 0) {
+                    history_selection_ -= filerRowCount();
+                    if (history_selection_ < 0) history_selection_ = 0;
+                    ensureHistoryVisible();
+                } else if (sym == SDLK_PAGEDOWN && n > 0) {
+                    history_selection_ += filerRowCount();
+                    if (history_selection_ >= n) history_selection_ = n - 1;
+                    ensureHistoryVisible();
                 } else if ((sym == SDLK_RETURN || sym == SDLK_KP_ENTER) && n > 0) {
                     requested_path_ = history_[history_selection_];
                     path_change_requested_ = true;
@@ -613,6 +621,16 @@ void Visualizer::update() {
                     ensureFilerSelectionVisible();
                 } else if (sym == SDLK_DOWN && file_list_count_ > 0) {
                     filer_selection_ = (filer_selection_ + 1) % file_list_count_;
+                    ensureFilerSelectionVisible();
+                } else if (sym == SDLK_PAGEUP) {
+                    filer_selection_ -= filerRowCount();
+                    if (filer_selection_ < 0) filer_selection_ = 0;
+                    ensureFilerSelectionVisible();
+                } else if (sym == SDLK_PAGEDOWN) {
+                    filer_selection_ += filerRowCount();
+                    if (filer_selection_ >= file_list_count_) {
+                        filer_selection_ = file_list_count_ - 1;
+                    }
                     ensureFilerSelectionVisible();
                 } else if ((sym == SDLK_RETURN || sym == SDLK_KP_ENTER) &&
                            file_list_count_ > 0) {
@@ -2215,8 +2233,8 @@ void Visualizer::renderFiler() {
     renderText(renderer_, font_title, header, panel_x + 20, panel_y + 10,
                200, 220, 255);
     renderText(renderer_, font_small_,
-               hist ? "UP/DOWN: select   ENTER: play   H/ESC: close"
-                    : "UP/DOWN: select   ENTER: open/play   LEFT/BACKSPACE: parent   F/ESC: close",
+               hist ? "UP/DOWN/PGUP/PGDN: select   ENTER: play   H/ESC: close"
+                    : "UP/DOWN/PGUP/PGDN: select   ENTER: open/play   LEFT/BACKSPACE: parent   F/ESC: close",
                panel_x + panel_w - 500, panel_y + 14, 130, 150, 200);
 
     const int row_h = 22;
