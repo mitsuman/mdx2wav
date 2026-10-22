@@ -30,6 +30,16 @@ set(MDX2WAV_SOURCES
 	gamdx/snes_spc/SNES_SPC_state.cpp
 	gamdx/snes_spc/SPC_DSP.cpp
 	gamdx/snes_spc/SPC_Filter.cpp
+	src/psf/psf_player.cpp
+	gamdx/psf/psflib.c
+	gamdx/psf/he/bios.c
+	gamdx/psf/he/iop.c
+	gamdx/psf/he/ioptimer.c
+	gamdx/psf/he/psx.c
+	gamdx/psf/he/r3000.c
+	gamdx/psf/he/spu.c
+	gamdx/psf/he/spucore.c
+	gamdx/psf/he/vfs.c
 )
 
 if(APPLE)
@@ -67,7 +77,24 @@ if(ENABLE_VISUALIZER)
 	add_definitions(-DENABLE_VISUALIZER)
 endif()
 
+# The PSF core is plain C and is compiled as such.
+set_source_files_properties(
+	gamdx/psf/psflib.c
+	gamdx/psf/he/bios.c
+	gamdx/psf/he/iop.c
+	gamdx/psf/he/ioptimer.c
+	gamdx/psf/he/psx.c
+	gamdx/psf/he/r3000.c
+	gamdx/psf/he/spu.c
+	gamdx/psf/he/spucore.c
+	gamdx/psf/he/vfs.c
+	PROPERTIES LANGUAGE C)
+
 add_executable(mdx2wav ${MDX2WAV_SOURCES})
+target_compile_definitions(mdx2wav PRIVATE EMU_COMPILE EMU_LITTLE_ENDIAN)
+target_include_directories(mdx2wav PRIVATE gamdx/psf gamdx/psf/he)
+find_package(ZLIB REQUIRED)
+target_link_libraries(mdx2wav ZLIB::ZLIB)
 
 if(APPLE)
 	target_link_libraries(mdx2wav "-framework AudioToolbox")

@@ -147,6 +147,14 @@ bool CommandLineParser::HandleLongOption(const std::string& arg, int& index, Com
     options->video_fps = fps;
     return true;
   }
+  if (name == "psf-bios") {
+    std::string str;
+    if (!require_value(&str)) {
+      return false;
+    }
+    options->psf_bios_filename = str;
+    return true;
+  }
   if (name == "screenshot") {
     std::string str;
     if (!require_value(&str)) {

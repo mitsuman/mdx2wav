@@ -16,6 +16,7 @@
 #include "../gamdx/mxdrvg/mxdrvg.h"
 #include "command_line_parser.h"
 #include "spc/spc_player.h"
+#include "psf/psf_player.h"
 
 #ifdef __APPLE__
 #include "platform_mac.h"
@@ -40,6 +41,19 @@ bool g_continuous_playback = false;
 // the visualizer, so both generation and state snapshots take this lock.
 static SPCPlayer* g_spc_audio_player = nullptr;
 static pthread_mutex_t g_spc_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static PSFPlayer* g_psf_audio_player = nullptr;
+static pthread_mutex_t g_psf_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static int PsfAudioFill(short* out, int frames) {
+  pthread_mutex_lock(&g_psf_audio_mutex);
+  int len = 0;
+  if (g_psf_audio_player && !g_psf_audio_player->IsFinished()) {
+    len = g_psf_audio_player->Generate((int16_t*)out, frames);
+  }
+  pthread_mutex_unlock(&g_psf_audio_mutex);
+  return len;
+}
 
 static int SpcAudioFill(short* out, int frames) {
   pthread_mutex_lock(&g_spc_audio_mutex);
@@ -103,6 +117,17 @@ static bool is_spc_path(const char* path) {
   fclose(f);
   static const char kSpcSignature[] = "SNES-SPC700 Sound File Data";
   return got == sizeof(signature) && memcmp(signature, kSpcSignature, sizeof(signature)) == 0;
+}
+
+// PSF / miniPSF files, recognised by extension or by the "PSF1" signature.
+static bool is_psf_path(const char* path) {
+  if (ends_with_ci(path, ".psf") || ends_with_ci(path, ".minipsf")) return true;
+  FILE* f = fopen(path, "rb");
+  if (!f) return false;
+  unsigned char signature[4];
+  const size_t got = fread(signature, 1, sizeof(signature), f);
+  fclose(f);
+  return got == 4 && memcmp(signature, "PSF\x01", 4) == 0;
 }
 
 static bool read_file_exact(const char* name, std::vector<unsigned char>* out) {
@@ -212,7 +237,50 @@ std::string readMusicTitle(const std::string& path) {
   };
 
   std::string title;
-  if (ends_with(".spc")) {
+  if (ends_with(".psf") || ends_with(".minipsf")) {
+    // PSF keeps its "[TAG]" block after the compressed program.  Only the tag
+    // area is read, so listing a folder stays cheap.
+    if (got >= 16) {
+      uint32_t reserved = (uint32_t)head[4] | ((uint32_t)head[5] << 8) |
+                          ((uint32_t)head[6] << 16) | ((uint32_t)head[7] << 24);
+      uint32_t compressed = (uint32_t)head[8] | ((uint32_t)head[9] << 8) |
+                            ((uint32_t)head[10] << 16) | ((uint32_t)head[11] << 24);
+      const long tag_offset = 16 + (long)reserved + (long)compressed;
+      FILE* psf = fopen(path.c_str(), "rb");
+      if (psf && fseek(psf, tag_offset, SEEK_SET) == 0) {
+        std::string tags;
+        char buf[260];
+        size_t n = 0;
+        while ((n = fread(buf, 1, sizeof(buf) - 1, psf)) > 0) {
+          buf[n] = 0;
+          tags += buf;
+          if (tags.size() > 8192) break;
+        }
+        fclose(psf);
+        const size_t tag_start = tags.find("[TAG]");
+        if (tag_start != std::string::npos) {
+          size_t pos = tag_start + 5;
+          while (pos < tags.size()) {
+            const size_t eol = tags.find('\n', pos);
+            std::string line = tags.substr(pos, eol == std::string::npos
+                                                    ? std::string::npos
+                                                    : eol - pos);
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) {
+              line.pop_back();
+            }
+            if (line.compare(0, 6, "title=") == 0) {
+              title = line.substr(6);
+              break;
+            }
+            if (eol == std::string::npos) break;
+            pos = eol + 1;
+          }
+        }
+      } else if (psf) {
+        fclose(psf);
+      }
+    }
+  } else if (ends_with(".spc")) {
     // ID666 text tag follows the 0x2E header when bit 0 of 0x23 is set.
     if (got > 0x2E && head[0x23] != 0) {
       size_t len = 0;
@@ -277,7 +345,11 @@ std::vector<std::string> listMusicFiles(const char* filepath) {
             (name[len-4] == '.' && name[len-3] == 'M' && name[len-2] == 'D' && name[len-1] == 'X'))) ||
           (len > 4 &&
            ((name[len-4] == '.' && name[len-3] == 's' && name[len-2] == 'p' && name[len-1] == 'c') ||
-            (name[len-4] == '.' && name[len-3] == 'S' && name[len-2] == 'P' && name[len-1] == 'C')))) {
+            (name[len-4] == '.' && name[len-3] == 'S' && name[len-2] == 'P' && name[len-1] == 'C'))) ||
+          (len > 4 && name[len-4] == '.' &&
+           strcasecmp(name + len - 4, ".psf") == 0) ||
+          (len > 8 &&
+           strcasecmp(name + len - 8, ".minipsf") == 0)) {
         std::string fullpath = dir_path + "/" + name;
         files.push_back(fullpath);
       }
@@ -436,15 +508,15 @@ void version() {
 
 void help() {
   printf(
-    "Usage: mdx2wav [options] <file.mdx|file.spc>\n"
-    "Convert an MDX or SPC music file to 16bit stereo raw pcm on stdout.\n"
+    "Usage: mdx2wav [options] <file.mdx|file.spc|file.psf>\n"
+    "Convert an MDX, SPC or PSF music file to 16bit stereo raw pcm on stdout.\n"
     " if you need to convert to other format, use ffmpeg like a following.\n"
     "  mdx2wav xxx.mdx | ffmpeg -f s16le -ar 44.1k -ac 2 -i - xxx.wav\n"
     " if you want to listen now, use aplay like a following.\n"
     "  mdx2wav xxx.mdx | aplay -f cd\n"
     "Options:\n"
     "  -d <sec>  : limit song duration. 0 means nolimit. (default:300; for SPC the\n"
-    "              ID666 length is used when present)\n"
+    "              ID666 length and for PSF the length tag are used when present)\n"
     "  -e <type> : set ym2151 emulation type, fmgen or mame. (default:fmgen, MDX only)\n"
     "  -f        : enable fadeout.\n"
 #ifdef ENABLE_VISUALIZER
@@ -458,6 +530,8 @@ void help() {
 #endif
     "  -l <loop> : set loop limit. (default:2, MDX only; SPC loops are controlled by the SPC program)\n"
     "  -m        : measure play time as sec.\n"
+    "  --psf-bios <file> : PS1 BIOS image used for .psf playback.  Also read from\n"
+    "              $PSF_BIOS, ./psx-bios.bin or ~/.config/mdx2wav/psx-bios.bin.\n"
 #ifdef __APPLE__
     "  -p        : play directly to audio device (macOS only).\n"
 #endif
@@ -564,6 +638,7 @@ int main(int argc, char **argv) {
   }
 
   bool is_spc = is_spc_path(mdx_name);
+  bool is_psf = !is_spc && is_psf_path(mdx_name);
 
   if (0 == strcmp(ym2151_type, "fmgen")) {
   } else if (0 == strcmp(ym2151_type, "mame")) {
@@ -625,6 +700,7 @@ int main(int argc, char **argv) {
     }
 
     is_spc = is_spc_path(mdx_name);
+    is_psf = !is_spc && is_psf_path(mdx_name);
 
     // YM2151状態管理オブジェクト作成
     ym_state = new YM2151State();
@@ -641,7 +717,7 @@ int main(int argc, char **argv) {
       ym2151_channels = 8;
       adpcm_channels = 0;
     }
-    int window_height = is_spc
+    int window_height = (is_spc || is_psf)
         ? 720
         : 75 + (ym2151_channels * 70) + (adpcm_channels * 45) + 20;
 
@@ -666,8 +742,9 @@ int main(int argc, char **argv) {
       fprintf(stderr, "Video recording mode: %s (%dfps)\n", video_filename, video_fps);
     } else {
       // 通常の表示モード
-      init_success = visualizer->init(is_spc ? "SPC Visualizer" : "MDX Visualizer",
-                                      1400, window_height);
+      init_success = visualizer->init(
+          is_spc ? "SPC Visualizer" : (is_psf ? "PSF Visualizer" : "MDX Visualizer"),
+          1400, window_height);
       if (!init_success) {
         fprintf(stderr, "Failed to initialize visualizer\n");
         delete visualizer;
@@ -678,6 +755,7 @@ int main(int argc, char **argv) {
 
     visualizer->setState(ym_state);
     visualizer->setSPCMode(is_spc);
+    visualizer->setPSFMode(is_psf);
 
     // 表示チャンネル数を設定
     visualizer->setDisplayChannels(is_spc ? 8 : ym2151_channels,
@@ -744,9 +822,10 @@ int main(int argc, char **argv) {
 #endif
 
   SPCPlayer* spc_player = nullptr;
+  PSFPlayer* psf_player = nullptr;
   bool mdx_started = false;
 
-  if (!is_spc) {
+  if (!is_spc && !is_psf) {
     MXDRVG_Start(SAMPLE_RATE, filter_mode, MDX_BUF_SIZE, PDX_BUF_SIZE);
     MXDRVG_TotalVolume(256);
     mdx_started = true;
@@ -763,12 +842,14 @@ int main(int argc, char **argv) {
 #endif
 
 reload_file:
-  // A directory may contain both formats; decide again for every file.
+  // A directory may contain several formats; decide again for every file.
   is_spc = is_spc_path(mdx_name);
+  is_psf = !is_spc && is_psf_path(mdx_name);
 
 #ifdef ENABLE_VISUALIZER
   if (visualizer) {
     visualizer->setSPCMode(is_spc);
+    visualizer->setPSFMode(is_psf);
     visualizer->setDisplayChannels(is_spc ? 8 : ym2151_channels,
                                   is_spc ? 0 : adpcm_channels);
   }
@@ -783,7 +864,7 @@ reload_file:
     MXDRVG_End();
     mdx_started = false;
   }
-  if (!is_spc) {
+  if (!is_spc && !is_psf) {
     MXDRVG_Start(SAMPLE_RATE, filter_mode, MDX_BUF_SIZE, PDX_BUF_SIZE);
     MXDRVG_TotalVolume(256);
     mdx_started = true;
@@ -831,6 +912,40 @@ reload_file:
 #ifdef __APPLE__
     setAudioPCMFillFunc(SpcAudioFill);
 #endif
+  } else if (is_psf) {
+    if (!psf_player) {
+      psf_player = new PSFPlayer();
+#ifdef __APPLE__
+      g_psf_audio_player = psf_player;
+#endif
+    }
+#ifdef __APPLE__
+    pthread_mutex_lock(&g_psf_audio_mutex);
+#endif
+    std::string psf_error;
+    const bool psf_loaded = psf_player->Load(
+        mdx_name, options.psf_bios_filename.c_str(), &psf_error);
+    if (psf_loaded) {
+      psf_player->SetSampleRate(SAMPLE_RATE);
+      psf_player->Start(loop, max_song_duration, fadeout ? 3.0 : 0.0);
+    }
+#ifdef __APPLE__
+    pthread_mutex_unlock(&g_psf_audio_mutex);
+#endif
+    if (!psf_loaded) {
+      fprintf(stderr, "Cannot load PSF %s: %s\n", mdx_name, psf_error.c_str());
+      return -1;
+    }
+    strncpy(title, psf_player->Title(), sizeof(title) - 1);
+    title[sizeof(title) - 1] = 0;
+    if (title[0] == 0) {
+      const char* base = strrchr(mdx_name, '/');
+      strncpy(title, base ? base + 1 : mdx_name, sizeof(title) - 1);
+      title[sizeof(title) - 1] = 0;
+    }
+#ifdef __APPLE__
+    setAudioPCMFillFunc(PsfAudioFill);
+#endif
   } else {
 #ifdef __APPLE__
     setAudioPCMFillFunc(nullptr);
@@ -853,7 +968,7 @@ reload_file:
       visualizer->setCurrentFileIndex(current_file_index);
     }
 
-    if (!is_spc) {
+    if (!is_spc && !is_psf) {
       // ADPCM全体バッファ情報を取得して設定
       void* adpcm_buffer = MXDRVG_GetADPCMBuffer();
       ym_state->setADPCMBufferInfo(adpcm_buffer, pdx_size);
@@ -873,6 +988,8 @@ reload_file:
   float song_duration = 0.0f;
   if (is_spc) {
     song_duration = (float)spc_player->Duration();
+  } else if (is_psf) {
+    song_duration = (float)psf_player->Duration();
   } else {
     song_duration = MXDRVG_MeasurePlayTime(loop, fadeout) / 1000.0f;
     // Warning: MXDRVG_MeasurePlayTime calls MXDRVG_End internaly,
@@ -943,6 +1060,35 @@ reload_file:
           pthread_mutex_unlock(&g_spc_audio_mutex);
 #endif
         }
+      } else if (is_psf) {
+        if (psf_player && visualizer) {
+          PSFPlayer::VoiceState pv[PSFPlayer::kVoices];
+#ifdef __APPLE__
+          pthread_mutex_lock(&g_psf_audio_mutex);
+#endif
+          psf_player->GetVoiceStates(pv);
+          PSFPlayer::GlobalState gs;
+          psf_player->GetGlobalState(&gs);
+#ifdef __APPLE__
+          pthread_mutex_unlock(&g_psf_audio_mutex);
+#endif
+          Visualizer::PSFVoice out[PSFPlayer::kVoices];
+          for (int vi = 0; vi < PSFPlayer::kVoices; vi++) {
+            out[vi].active = pv[vi].active;
+            out[vi].pitch = pv[vi].pitch;
+            out[vi].volume_left = pv[vi].volume_left;
+            out[vi].volume_right = pv[vi].volume_right;
+            out[vi].envelope = pv[vi].envelope;
+            out[vi].adsr1 = pv[vi].adsr1;
+            out[vi].adsr2 = pv[vi].adsr2;
+            out[vi].start_address = pv[vi].start_address;
+            out[vi].loop_address = pv[vi].loop_address;
+            out[vi].current_address = pv[vi].current_address;
+          }
+          visualizer->updatePSFState(out, PSFPlayer::kVoices,
+                                     gs.master_volume_left, gs.master_volume_right,
+                                     gs.reverb_enabled != 0);
+        }
       } else if (opm_original) {
         void* opm_ptr = opm_original->GetOPMPointer();
         if (opm_ptr) {
@@ -963,7 +1109,7 @@ reload_file:
       static bool spc_paused = false;
       bool current_pause_state = visualizer->isMXDRVGPaused();
       if (current_pause_state != last_pause_state) {
-        if (is_spc) {
+        if (is_spc || is_psf) {
           spc_paused = current_pause_state;
         } else if (current_pause_state) {
           MXDRVG_Pause();  // レジスタ書き込みを停止
@@ -1001,7 +1147,7 @@ reload_file:
         if (!visualizer->isRunning()) {
           break;
         }
-        if (is_spc && spc_paused) {
+        if ((is_spc || is_psf) && spc_paused) {
           usleep(16 * 1000);
           continue;
         }
@@ -1012,6 +1158,10 @@ reload_file:
     // ただし動画録画モードの場合は曲終了を検知して停止
     if (is_spc) {
       if (!play_audio && spc_player && spc_player->IsFinished()) {
+        break;
+      }
+    } else if (is_psf) {
+      if (!play_audio && psf_player && psf_player->IsFinished()) {
         break;
       }
     } else {
@@ -1041,7 +1191,7 @@ reload_file:
       // The SPC player has a defined duration (ID666 or -d), so stop when its
       // callback finishes even with the visualizer.  MDX visualizer playback
       // stays continuous as before.
-      if (!enable_visualizer || is_spc)
+      if (!enable_visualizer || is_spc || is_psf)
 #endif
       {
         if (audioCtx.terminated) {
@@ -1074,6 +1224,9 @@ reload_file:
     if (is_spc) {
       if (!spc_player || spc_player->IsFinished()) break;
       len = spc_player->Generate((int16_t*)audio_buf, samples_to_get);
+    } else if (is_psf) {
+      if (!psf_player || psf_player->IsFinished()) break;
+      len = psf_player->Generate((int16_t*)audio_buf, samples_to_get);
     } else {
       len = MXDRVG_GetPCM(audio_buf, samples_to_get);
     }

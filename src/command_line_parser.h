@@ -23,6 +23,7 @@ struct CommandLineOptions {
   std::string screenshot_filename;
   std::string spectrum_debug_filename;
   std::string video_filename;
+  std::string psf_bios_filename;
   int video_fps = 60;
   int ym2151_channels = 8;
   int adpcm_channels = 8;

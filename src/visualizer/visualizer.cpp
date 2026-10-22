@@ -95,6 +95,11 @@ Visualizer::Visualizer()
     , file_titles_(nullptr)
     , file_list_count_(0)
     , current_file_index_(0)
+    , psf_mode_(false)
+    , psf_voice_count_(0)
+    , psf_master_left_(0)
+    , psf_master_right_(0)
+    , psf_reverb_(false)
     , filer_mode_(false)
     , filer_selection_(0)
     , filer_scroll_(0)
@@ -752,9 +757,13 @@ void Visualizer::update() {
     
     // 各パーツを描画
     renderTitle();
-    renderTimerInfo();
-    renderChannelInfo();
-    renderKeyboard();
+    if (psf_mode_) {
+        renderPSF();
+    } else {
+        renderTimerInfo();
+        renderChannelInfo();
+        renderKeyboard();
+    }
     if (spectrum_enabled_) {
         renderSpectrum();
     }
@@ -801,9 +810,13 @@ bool Visualizer::renderVideoFrame() {
     
     // 各種描画（通常モードと同じ）
     renderTitle();
-    renderTimerInfo();
-    renderChannelInfo();
-    renderKeyboard();
+    if (psf_mode_) {
+        renderPSF();
+    } else {
+        renderTimerInfo();
+        renderChannelInfo();
+        renderKeyboard();
+    }
     if (spectrum_enabled_) {
         renderSpectrum();
     }
@@ -1006,6 +1019,116 @@ void Visualizer::setCurrentFileIndex(int index) {
     if (index >= file_list_count_) index = file_list_count_ - 1;
     current_file_index_ = index;
     filer_selection_ = index;
+}
+
+void Visualizer::setPSFMode(bool enabled) {
+    psf_mode_ = enabled;
+    if (enabled) {
+        psf_voice_count_ = 24;
+    }
+}
+
+void Visualizer::updatePSFState(const PSFVoice* voices, int count,
+                                int master_volume_left, int master_volume_right,
+                                bool reverb) {
+    psf_voice_count_ = std::max(0, std::min(count, 24));
+    if (voices) {
+        for (int i = 0; i < psf_voice_count_; i++) psf_voices_[i] = voices[i];
+    }
+    psf_master_left_ = master_volume_left;
+    psf_master_right_ = master_volume_right;
+    psf_reverb_ = reverb;
+}
+
+// PSF (PlayStation SPU) panel: 24 voices with their pitch, volume, envelope
+// and sample addresses.
+void Visualizer::renderPSF() {
+    TTF_Font* font = (TTF_Font*)font_small_;
+    if (!font) return;
+
+    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 0);
+    const int row_h = 25;
+    const int start_y = 52;
+    const int label_x = 12;
+    const int pitch_x = 70;
+    const int vol_x = 170;
+    const int env_x = 300;
+    const int addr_x = 470;
+
+    char text[128];
+    snprintf(text, sizeof(text),
+             "PLAYSTATION / SPU 24 VOICES   MVOLL %02X  MVOLR %02X  REVERB %s",
+             psf_master_left_ & 0xFF, psf_master_right_ & 0xFF,
+             psf_reverb_ ? "ON" : "OFF");
+    renderBitmapText(text, label_x, start_y - 16, 120, 160, 220);
+
+    static const Uint8 colors[6][3] = {
+        {60, 200, 255}, {80, 255, 120}, {255, 220, 100},
+        {255, 140, 180}, {180, 160, 255}, {255, 180, 120},
+    };
+
+    for (int v = 0; v < 24; v++) {
+        const PSFVoice& f = psf_voices_[v];
+        const int y = start_y + v * row_h;
+        const Uint8* col = colors[v % 6];
+
+        // Voice number and key-on indicator
+        SDL_Rect dot = {label_x + 2, y + 6, 6, 6};
+        SDL_SetRenderDrawColor(renderer_, f.active ? col[0] : 40,
+                               f.active ? col[1] : 40,
+                               f.active ? col[2] : 60, 255);
+        SDL_RenderFillRect(renderer_, &dot);
+
+        snprintf(text, sizeof(text), "%02d", v);
+        renderBitmapText(text, label_x + 12, y + 4, f.active ? 220 : 90,
+                         f.active ? 230 : 100, 255);
+
+        snprintf(text, sizeof(text), "PIT %04X", f.pitch & 0x3FFF);
+        renderBitmapText(text, pitch_x, y + 4, f.active ? 120 : 60,
+                         f.active ? 200 : 80, 255);
+
+        // Pitch bar: 0x1000 (32 kHz) is the reference point.
+        {
+            SDL_Rect bar = {pitch_x, y + 16, 90, 3};
+            SDL_SetRenderDrawColor(renderer_, 30, 30, 60, 255);
+            SDL_RenderFillRect(renderer_, &bar);
+            int w = (f.pitch * 90) / 0x4000;
+            if (w > 90) w = 90;
+            if (w > 0 && f.active) {
+                bar.w = w;
+                SDL_SetRenderDrawColor(renderer_, col[0], col[1], col[2], 255);
+                SDL_RenderFillRect(renderer_, &bar);
+            }
+            SDL_Rect ref = {pitch_x + 90 * 0x1000 / 0x4000, y + 15, 1, 5};
+            SDL_SetRenderDrawColor(renderer_, 120, 140, 200, 255);
+            SDL_RenderFillRect(renderer_, &ref);
+        }
+
+        snprintf(text, sizeof(text), "VOL %04X %04X",
+                 f.volume_left & 0x3FFF, f.volume_right & 0x3FFF);
+        renderBitmapText(text, vol_x, y + 4, f.active ? 180 : 60,
+                         f.active ? 180 : 60, f.active ? 220 : 80);
+
+        // Envelope bar
+        {
+            SDL_Rect bar = {env_x, y + 8, 100, 8};
+            SDL_SetRenderDrawColor(renderer_, 30, 30, 60, 255);
+            SDL_RenderFillRect(renderer_, &bar);
+            int w = (f.envelope * 100) / 0x7FFF;
+            if (w > 100) w = 100;
+            if (w > 0 && f.active) {
+                bar.w = w;
+                SDL_SetRenderDrawColor(renderer_, col[0], col[1], col[2], 255);
+                SDL_RenderFillRect(renderer_, &bar);
+            }
+        }
+
+        snprintf(text, sizeof(text), "ADSR %04X %04X  SSA %05X  NAX %05X",
+                 f.adsr1 & 0xFFFF, f.adsr2 & 0xFFFF,
+                 f.start_address & 0x7FFFF, f.current_address & 0x7FFFF);
+        renderBitmapText(text, addr_x, y + 4, f.active ? 150 : 60,
+                         f.active ? 160 : 70, f.active ? 200 : 90);
+    }
 }
 
 // テキスト描画ヘルパー

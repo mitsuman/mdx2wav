@@ -121,6 +121,25 @@ public:
     // ファイル一覧（フィルタモード）表示中か
     bool isFilerMode() const { return filer_mode_; }
 
+    // PSF (PlayStation SPU) 表示
+    struct PSFVoice {
+        bool active;
+        int pitch;
+        int volume_left;
+        int volume_right;
+        int envelope;
+        int adsr1;
+        int adsr2;
+        int start_address;
+        int loop_address;
+        int current_address;
+    };
+    void setPSFMode(bool enabled);
+    bool isPSFMode() const { return psf_mode_; }
+    void updatePSFState(const PSFVoice* voices, int count,
+                        int master_volume_left, int master_volume_right,
+                        bool reverb);
+
     // 曲の再スタート要求
     bool hasRestartRequest() const { return restart_requested_; }
     void clearRestartRequest() { restart_requested_ = false; }
@@ -236,6 +255,12 @@ private:
     double elapsed_time_;  // 秒単位の経過時間
     
     // ファイルリスト管理
+    bool psf_mode_;
+    PSFVoice psf_voices_[24];
+    int psf_voice_count_;
+    int psf_master_left_;
+    int psf_master_right_;
+    bool psf_reverb_;
     const char** file_list_;
     const char** file_titles_;   // may be nullptr
     int file_list_count_;
@@ -300,6 +325,7 @@ private:
     // 描画メソッド
     void renderTitle();
     void renderFiler();
+    void renderPSF();
     int filerRowCount() const;
     void ensureFilerSelectionVisible();
     void renderTimerInfo();

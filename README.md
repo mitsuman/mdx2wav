@@ -76,6 +76,23 @@ See [web/README.md](web/README.md) for the build requirements and details. The
 browser output is bit-exact with the native `mdx2wav` for MDX, and within one
 LSB on a handful of samples for SPC, over the first seconds of playback.
 
+## PSF support
+
+PSF (PlayStation Sound Format, `.psf` / `.minipsf`) files contain PlayStation
+code, so mdx2wav runs them on the R3000 + SPU core from *Highly Experimental*
+(vendored in `gamdx/psf/`, see the README there).  PSF playback needs a
+PlayStation BIOS image, which cannot be bundled: pass one with
+`--psf-bios <file>`, or put it at `$PSF_BIOS`, `./psx-bios.bin` or
+`~/.config/mdx2wav/psx-bios.bin`.  Song length and fade come from the
+`length` / `fade` tags, and `-t` prints the title.
+
+The PSF panel shows the 24 SPU voices with their pitch, L/R volume, envelope,
+ADSR settings and sample addresses.  Only PSF1 is supported (PSF2 would need a
+PS2 emulator), and the web build does not include the PSF core yet.
+
+Note that `gamdx/psf/he/` is GPLv2 (PCSX-derived), so a binary built with PSF
+support is a GPLv2 work; the rest of the project stays Apache-2.0.
+
 ## SPC support
 
 `gamdx/snes_spc/` contains Blargg's snes_spc 0.9.0 (LGPL-2.1-or-later) with
