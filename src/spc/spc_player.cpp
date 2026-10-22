@@ -28,7 +28,8 @@ std::string ReadTag(const uint8_t* data, size_t size, size_t offset, size_t len)
 // Decode a BRR stream for display purposes.  This mirrors the S-DSP's decoder
 // closely enough to draw the waveform, but it is not used for audio.
 int DecodeBRR(const uint8_t* ram, int address, int loop_address,
-              int16_t* out, int max_samples, bool* looped_out) {
+              int16_t* out, int max_samples, bool* looped_out,
+              int* loop_samples_out) {
   int written = 0;
   int addr = address & 0xFFFF;
   const int loop_addr = loop_address & 0xFFFF;
@@ -36,7 +37,8 @@ int DecodeBRR(const uint8_t* ram, int address, int loop_address,
   int prev2 = 0;
 
   bool looped = false;
-  for (int block = 0; block < 64 && written < max_samples; block++) {
+  int loop_length = 0;
+  for (int block = 0; block < 256 && written < max_samples; block++) {
     const int header = ram[addr];
     addr = (addr + 1) & 0xFFFF;
 
@@ -93,6 +95,7 @@ int DecodeBRR(const uint8_t* ram, int address, int loop_address,
       // A looped sample usually sets both end and loop on its final block.
       // Follow the loop for the display so short loops fill the strip.
       if (loop_flag && loop_addr != 0) {
+        if (loop_length == 0) loop_length = written;
         addr = loop_addr;
       } else {
         break;
@@ -101,6 +104,7 @@ int DecodeBRR(const uint8_t* ram, int address, int loop_address,
   }
 
   if (looped_out) *looped_out = looped;
+  if (loop_samples_out) *loop_samples_out = loop_length;
   return written;
 }
 
@@ -416,7 +420,8 @@ void SPCPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
       if (!start) start = s.brr_address;
       const int loop_target = s.loop_address ? s.loop_address : start;
       s.waveform_samples = DecodeBRR(ram, start, loop_target, s.waveform,
-                                     kWaveformSamples, &s.looped);
+                                     kWaveformSamples, &s.looped,
+                                     &s.loop_samples);
 
       // Keep the pitch analysis window bounded; the display buffer itself can
       // be longer (loops are followed to fill it).
@@ -427,6 +432,7 @@ void SPCPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
       s.loop_address = 0;
       s.brr_address = 0;
       s.looped = false;
+      s.loop_samples = 0;
       s.waveform_samples = 0;
       s.note = 0;
     }

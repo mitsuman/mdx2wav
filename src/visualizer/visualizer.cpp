@@ -2247,24 +2247,27 @@ void Visualizer::renderKeyboard() {
             }
         }
         
-        // チャンネルの波形を鍵盤の右側に表示
-        int16_t waveform_data[YM2151State::CHANNEL_WAVEFORM_SIZE];
-        state_->getChannelWaveform(ch, waveform_data, YM2151State::CHANNEL_WAVEFORM_SIZE);
-        
-        // アルゴリズムベースの色を取得
-        int wave_r, wave_g, wave_b;
-        getChannelColor(channel.algorithm, wave_r, wave_g, wave_b);
-        
-        // 汎用波形描画関数を使用（YM2151用のスケールを適用）。
-        // The waveform may now be wider than the captured buffer, so only feed it
-        // as many samples as actually exist.
-        int fm_samples = YM2151State::CHANNEL_WAVEFORM_SIZE;
-        if (waveform_width < fm_samples) {
-            fm_samples = waveform_width;
+        // チャンネルの波形を鍵盤の右側に表示。SPCでは renderSPCChannelInfo()
+        // が音量・ピッチを反映した波形を描くので、ここでは重ねて描かない。
+        if (!spc_mode_) {
+            int16_t waveform_data[YM2151State::CHANNEL_WAVEFORM_SIZE];
+            state_->getChannelWaveform(ch, waveform_data, YM2151State::CHANNEL_WAVEFORM_SIZE);
+
+            // アルゴリズムベースの色を取得
+            int wave_r, wave_g, wave_b;
+            getChannelColor(channel.algorithm, wave_r, wave_g, wave_b);
+
+            // 汎用波形描画関数を使用（YM2151用のスケールを適用）。
+            // The waveform may now be wider than the captured buffer, so only feed it
+            // as many samples as actually exist.
+            int fm_samples = YM2151State::CHANNEL_WAVEFORM_SIZE;
+            if (waveform_width < fm_samples) {
+                fm_samples = waveform_width;
+            }
+            renderChannelWaveform(waveform_x, base_y + 2, waveform_width, waveform_height,
+                                waveform_data, fm_samples,
+                                wave_r, wave_g, wave_b, ch, ym2151_waveform_scale_);
         }
-        renderChannelWaveform(waveform_x, base_y + 2, waveform_width, waveform_height,
-                            waveform_data, fm_samples,
-                            wave_r, wave_g, wave_b, ch, ym2151_waveform_scale_);
     }
 }
 

@@ -285,7 +285,7 @@ private:
     void renderLFOWaveform(int x, int y, int waveform, int r, int g, int b);
     void draw7Segment(int x, int y, int digit, int r, int g, int b, int seg_width, int seg_height);
     void renderBitmapText(const char* text, int x, int y, int r, int g, int b);
-    void renderChannelWaveform(int x, int y, int width, int height, const int16_t* waveform_data, int sample_count, int color_r, int color_g, int color_b, int ch_id, float waveform_scale = 1.0f);
+    void renderChannelWaveform(int x, int y, int width, int height, const int16_t* waveform_data, int sample_count, int color_r, int color_g, int color_b, int ch_id, float waveform_scale = 1.0f, bool auto_scale = true);
     int findStableWaveformOffset(const int16_t* waveform_data, int sample_count, int width, int ch);
     void getColorFromAddress(uintptr_t address, int& r, int& g, int& b);
     

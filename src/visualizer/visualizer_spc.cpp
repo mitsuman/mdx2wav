@@ -132,7 +132,7 @@ void Visualizer::renderSPCChannelInfo() {
     }
     renderChannelWaveform(channelWaveformX(), y + 2, width, line_height - 20,
                           samples > 0 ? waveform : nullptr, samples,
-                          r, g, b, ch, ym2151_waveform_scale_);
+                          r, g, b, ch, ym2151_waveform_scale_, false);
 
     y += line_height;
   }

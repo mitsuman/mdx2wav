@@ -15,7 +15,7 @@
 void Visualizer::renderChannelWaveform(int x, int y, int width, int height, 
                                         const int16_t* waveform_data, int sample_count,
                                         int color_r, int color_g, int color_b, int ch_id,
-                                        float waveform_scale) {
+                                        float waveform_scale, bool auto_scale) {
     // 波形の背景（暗い枠）
     SDL_SetRenderDrawColor(renderer_, 30, 30, 40, 255);
     SDL_Rect wave_bg = {x, y, width, height};
@@ -35,7 +35,7 @@ void Visualizer::renderChannelWaveform(int x, int y, int width, int height,
 #ifdef MDXWEB_SAFE_RENDER
     int samples_to_draw = sample_count < width ? sample_count : width;
     float adaptive_scale = waveform_scale;
-    if (ch_id >= 0 && ch_id < MAX_CHANNELS) {
+    if (auto_scale && ch_id >= 0 && ch_id < MAX_CHANNELS) {
         const float TARGET_OCCUPANCY = 0.92f;
         const float MIN_AUTO_SCALE = 0.2f;
         const float MAX_AUTO_SCALE = 8.0f;
@@ -69,7 +69,7 @@ void Visualizer::renderChannelWaveform(int x, int y, int width, int height,
         int samples_to_draw = std::min(width, sample_count - start_offset);
         float adaptive_scale = waveform_scale;
 
-        if (ch_id >= 0 && ch_id < MAX_CHANNELS && samples_to_draw > 0) {
+        if (auto_scale && ch_id >= 0 && ch_id < MAX_CHANNELS && samples_to_draw > 0) {
             const float TARGET_OCCUPANCY = 0.92f;
             const float MIN_AUTO_SCALE = 0.2f;
             const float MAX_AUTO_SCALE = 8.0f;

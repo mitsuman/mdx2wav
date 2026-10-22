@@ -175,7 +175,8 @@ public:
                         int left_volume, int right_volume, int pitch,
                         int envelope, int envelope_phase, int source_address,
                         int loop_address, int brr_address, bool looped,
-                        const int16_t* waveform, int waveform_samples);
+                        int loop_samples, const int16_t* waveform,
+                        int waveform_samples);
     void setSPCGlobal(const SPCGlobal& global);
     void getSPCGlobal(SPCGlobal& out);
 
