@@ -599,19 +599,33 @@ void Visualizer::update() {
                 continue;
             }
 
+            if ((sym == SDLK_UP || sym == SDLK_DOWN) && file_list_count_ > 0) {
+                // The cursor keys open the file list instead of jumping to the
+                // next song, and the same press moves the selection.
+                filer_mode_ = true;
+                filer_selection_ = current_file_index_;
+                filer_scroll_ = 0;
+                if (sym == SDLK_UP) {
+                    filer_selection_ =
+                        (filer_selection_ - 1 + file_list_count_) % file_list_count_;
+                } else {
+                    filer_selection_ = (filer_selection_ + 1) % file_list_count_;
+                }
+                ensureFilerSelectionVisible();
+                continue;
+            }
+
             if (event.key.keysym.sym == SDLK_ESCAPE || event.key.keysym.sym == SDLK_q) {
                 running_ = false;
                 return;
-            } else if ((event.key.keysym.sym == SDLK_LEFT ||
-                        event.key.keysym.sym == SDLK_UP) && file_list_count_ > 0) {
+            } else if (event.key.keysym.sym == SDLK_LEFT && file_list_count_ > 0) {
                 // 前のファイルへ（リストの先頭からは末尾へ回り込む）
                 int new_index = current_file_index_ - 1;
                 if (new_index < 0) new_index = file_list_count_ - 1;
                 requested_file_index_ = new_index;
                 file_change_requested_ = true;
                 return;
-            } else if ((event.key.keysym.sym == SDLK_RIGHT ||
-                        event.key.keysym.sym == SDLK_DOWN) && file_list_count_ > 0) {
+            } else if (event.key.keysym.sym == SDLK_RIGHT && file_list_count_ > 0) {
                 // 次のファイルへ（末尾からは先頭へ回り込む）
                 int new_index = (current_file_index_ + 1) % file_list_count_;
                 requested_file_index_ = new_index;
