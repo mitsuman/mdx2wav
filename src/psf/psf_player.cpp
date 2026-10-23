@@ -245,6 +245,7 @@ PSFPlayer::PSFPlayer()
   for (int i = 0; i < kVoices; i++) {
     key_on_seen_[i] = 0;
     last_wave_pos_[i] = 0;
+    note_on_pos_[i] = 0;
     wave_stall_[i] = 0;
   }
 }
@@ -576,15 +577,36 @@ void PSFPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
     s.active = s.phase != 0;
     s.waveform_samples = 0;
 
+    if (s.note_on) note_on_pos_[v] = spu_dbg_wave_pos(spu, (uint32)v);
     if (s.active) {
       // Copy the captured per-voice output (the actual level used in the mix).
       const int ring_size = 2048;
       const int16_t* ring = spu_dbg_waveform(spu, (uint32)v);
       const uint32 pos = spu_dbg_wave_pos(spu, (uint32)v);
-      const int count = std::min((int)kWaveformSamples, ring_size);
+      // Only show what has been captured since the note-on, so a short
+      // one-shot sample is stretched across the panel instead of being a
+      // dot at the right edge of an otherwise empty window.
+      uint32_t available = pos - note_on_pos_[v];
+      int count = std::min((int)kWaveformSamples, ring_size);
+      if (available > 0 && (int)available < count) count = (int)available;
       for (int j = 0; j < count; j++) {
         s.waveform[j] = ring[(pos - count + j + ring_size) & (ring_size - 1)];
       }
+      // A short one-shot leaves the captured window almost empty; drop the
+      // leading silence so what was captured is stretched across the panel.
+      int first = 0;
+      while (first < count - 8 && s.waveform[first] == 0) first++;
+      if (first > 0) {
+        memmove(s.waveform, s.waveform + first, (count - first) * sizeof(s.waveform[0]));
+        count -= first;
+      }
+      // Nothing but silence captured (the sample ended before producing any
+      // output): do not draw a flat line for it.
+      bool any = false;
+      for (int j = 0; j < count; j++) {
+        if (s.waveform[j] != 0) { any = true; break; }
+      }
+      if (!any) count = 0;
       s.waveform_samples = count;
       // A voice that no longer feeds the mix (muted, finished or still
       // deferred) would otherwise show the last window forever.
@@ -594,7 +616,7 @@ void PSFPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
         last_wave_pos_[v] = pos;
         wave_stall_[v] = 0;
       }
-      if (wave_stall_[v] >= 4) {
+      if (wave_stall_[v] >= 30) {
         // The voice no longer produces samples (its sample ended or it is not
         // routed), so stop showing it as playing even if the envelope is still
         // decaying.
@@ -616,6 +638,11 @@ void PSFPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
         if (tune <= 0.0f) tune = 0.0f;
       } else {
         tune = it->second > 0.0f ? it->second : 0.0f;
+      }
+      if (tune <= 0.0f) {
+        // Tuning unknown: assume the sample plays at C4 (MIDI 60) at the
+        // SPU's base pitch, so at least the pitch register gives a note.
+        tune = 60.0f;
       }
       if (tune > 0.0f) {
         float n = tune + 12.0f * (float)log2((double)s.pitch / 4096.0);
