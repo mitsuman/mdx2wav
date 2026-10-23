@@ -8,6 +8,7 @@
 #define __PSX_SPU_H__
 
 #include "emuconfig.h"
+#include "spucore.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -29,6 +30,10 @@ uint32 EMU_CALL spu_getreg_main(void *state, uint32 n);
 uint32 EMU_CALL spu_getreg_flag(void *state, uint32 n);
 /* Pointer to the 512 KB SPU RAM (16-bit words). */
 uint16* EMU_CALL spu_get_ram(void *state);
+
+/* Per-voice output sink (see spucore.h). */
+void   EMU_CALL spu_set_wave_sink(void *state, SPUCORE_WAVE_SINK sink, void *user);
+uint32 EMU_CALL spu_dbg_voice_addr(void *state, uint32 voice);
 
 /* Per-voice captured output (ring buffer of 2048 samples). */
 int16_t const* EMU_CALL spu_dbg_waveform(void *state, uint32 voice);

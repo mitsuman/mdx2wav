@@ -25,6 +25,14 @@ uint32 EMU_CALL spucore_getreg      (void *state, uint32 n);
 void   EMU_CALL spucore_setreg      (void *state, uint32 n, uint32 value, uint32 mask);
 uint32 EMU_CALL spucore_getreg_voice(void *state, uint32 voice, uint32 n);
 
+/* Per-voice output sink, called from the mixing loop with the exact sample
+   value that is added to the main mix.  Lets the visualizer collect the
+   waveform without reading back the core state (which the engine may
+   snapshot and restore). */
+typedef void (EMU_CALL *SPUCORE_WAVE_SINK)(void *user, uint32 voice, sint32 amp);
+void   EMU_CALL spucore_set_wave_sink(void *state, SPUCORE_WAVE_SINK sink, void *user);
+uint32 EMU_CALL spucore_dbg_voice_addr(void *state, uint32 voice);
+
 /* Captured per-voice output (ring of 2048 samples) for the visualizer. */
 int16_t const* EMU_CALL spucore_dbg_waveform(void *state, uint32 voice);
 uint32 EMU_CALL spucore_dbg_wave_pos(void *state, uint32 voice);

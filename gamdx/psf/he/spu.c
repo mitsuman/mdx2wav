@@ -153,6 +153,12 @@ uint32 EMU_CALL spu_getreg_main(void *state, uint32 n) {
 int16_t const* EMU_CALL spu_dbg_waveform(void *state, uint32 voice) {
   return spucore_dbg_waveform(CORESTATE(0), voice);
 }
+uint32 EMU_CALL spu_dbg_voice_addr(void *state, uint32 voice) {
+  return spucore_dbg_voice_addr(CORESTATE(0), voice);
+}
+void EMU_CALL spu_set_wave_sink(void *state, SPUCORE_WAVE_SINK sink, void *user) {
+  spucore_set_wave_sink(CORESTATE(0), sink, user);
+}
 uint32 EMU_CALL spu_dbg_wave_pos(void *state, uint32 voice) {
   return spucore_dbg_wave_pos(CORESTATE(0), voice);
 }

@@ -11,6 +11,7 @@
 #include "../../gamdx/psf/he/psx.h"
 #include "../../gamdx/psf/he/bios.h"
 #include "../../gamdx/psf/he/iop.h"
+#include "../../gamdx/psf/he/spu.h"
 #include "../../gamdx/psf/he/r3000.h"
 #include "../../gamdx/psf/he/spu.h"
 #include "../../gamdx/psf/he/spucore.h"
@@ -246,6 +247,8 @@ PSFPlayer::PSFPlayer()
     key_on_seen_[i] = 0;
     last_wave_pos_[i] = 0;
     wave_stall_[i] = 0;
+    wave_pos_[i] = 0;
+    memset(wave_ring_[i], 0, sizeof(wave_ring_[i]));
   }
 }
 
@@ -454,6 +457,13 @@ void PSFPlayer::Start(int loop, double max_duration, double fadeout_seconds) {
 
   if (sample_rate_ != kOutputRate) resampler_.Init(kOutputRate, sample_rate_);
   if (loaded_) ResetCore();
+
+  // Collect the waveform from the mixing loop itself, not from the (possibly
+  // snapshot/restored) core state.
+  if (state_) {
+    spu_set_wave_sink(iop_get_spu_state(psx_get_iop_state(state_)),
+                      &PSFPlayer::WaveSink, this);
+  }
 }
 
 int PSFPlayer::Generate(int16_t* out, int frames) {
@@ -515,6 +525,16 @@ int PSFPlayer::GenerateCore(int16_t* out, int frames) {
   return produced;
 }
 
+void PSFPlayer::WaveSink(void* user, uint32_t voice, int32_t amp) {
+  PSFPlayer* self = static_cast<PSFPlayer*>(user);
+  if (!self || voice >= (uint32_t)kVoices) return;
+  self->AppendWaveSample((int)voice, (int16_t)amp);
+}
+
+void PSFPlayer::AppendWaveSample(int voice, int16_t amp) {
+  wave_ring_[voice][wave_pos_[voice]++ & 2047] = amp;
+}
+
 void PSFPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
   if (!out) return;
   memset(out, 0, sizeof(VoiceState) * kVoices);
@@ -538,7 +558,7 @@ void PSFPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
     if (s.note_on) key_on_seen_[v] = ons;
     s.start_address = (int)spu_getreg_voice(spu, v, SPUREG_VOICE_SSA);
     s.loop_address = (int)spu_getreg_voice(spu, v, SPUREG_VOICE_LSAX);
-    s.current_address = (int)spu_getreg_voice(spu, v, SPUREG_VOICE_NAX);
+    s.current_address = (int)spu_dbg_voice_addr(spu, (uint32)v);
     if (s.start_address > 0) {
       // The playback-position meter follows the region that is actually
       // playing.  The loop-start register is hardware-updated and therefore
@@ -579,8 +599,8 @@ void PSFPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
     if (s.active) {
       // Copy the captured per-voice output (the actual level used in the mix).
       const int ring_size = 2048;
-      const int16_t* ring = spu_dbg_waveform(spu, (uint32)v);
-      const uint32 pos = spu_dbg_wave_pos(spu, (uint32)v);
+      const int16_t* ring = wave_ring_[v];
+      const uint32 pos = wave_pos_[v];
       int count = std::min((int)kWaveformSamples, ring_size);
       for (int j = 0; j < count; j++) {
         s.waveform[j] = ring[(pos - count + j + ring_size) & (ring_size - 1)];

@@ -113,6 +113,12 @@ class PSFPlayer {
   mutable std::map<int, float> sample_tunes_;  // sample start address -> note
   mutable std::map<int, int> sample_ends_;     // start address -> end address
   mutable uint32_t key_on_seen_[kVoices];      // last KON counter seen
+  // Per-voice waveform ring, filled by the SPU sink while it mixes.
+  int16_t wave_ring_[kVoices][2048];
+  uint32_t wave_pos_[kVoices];
+  static void WaveSink(void* user, uint32_t voice, int32_t amp);
+  void AppendWaveSample(int voice, int16_t amp);
+
   mutable uint32_t last_wave_pos_[kVoices];    // waveform ring position seen
   mutable int wave_stall_[kVoices];            // frames without new samples
 };

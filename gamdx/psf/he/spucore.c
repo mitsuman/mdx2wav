@@ -17,6 +17,9 @@
 // IRQ timing), which would otherwise reset the capture positions.
 static sint16 g_dbg_wave[24][2048];
 static uint32 g_dbg_wave_pos[24];
+static SPUCORE_WAVE_SINK g_wave_sink;
+static void *g_wave_sink_user;
+static uint32 g_dbg_addr[24];   // current sample address per voice
 
 ////////////////////////////////////////////////////////////////////////////////
 /*
@@ -1755,6 +1758,7 @@ static void EMU_CALL render(struct SPUCORE_STATE *state, uint16 *ram, sint16 *bu
       memset(ibuffm, 0, 4 * samples);
       continue;
     }
+    g_dbg_addr[ch] = state->chan[ch].sample.block_addr;
     memcpy(ibuffm, ibuf, 4 * r);
     if(r < samples) memset(ibuffm + r, 0, 4 * (samples-r));
     v_l = volume_getlevel(state->chan[ch].vol+0);
@@ -1775,7 +1779,11 @@ static void EMU_CALL render(struct SPUCORE_STATE *state, uint16 *ram, sint16 *bu
         else amp = q_l;
         if (amp > 32767) amp = 32767;
         if (amp < -32768) amp = -32768;
-        g_dbg_wave[ch][g_dbg_wave_pos[ch]++ & 2047] = (sint16)amp;
+        if (g_wave_sink) {
+          g_wave_sink(g_wave_sink_user, (uint32)ch, amp);
+        } else {
+          g_dbg_wave[ch][g_dbg_wave_pos[ch]++ & 2047] = (sint16)amp;
+        }
       }
       if(main_l) ibufmix[2*i+0] += q_l;
       if(main_r) ibufmix[2*i+1] += q_r;
@@ -2082,6 +2090,17 @@ void EMU_CALL spucore_setreg(void *state, uint32 n, uint32 value, uint32 mask) {
 /*
 ** Voice register get/set
 */
+
+uint32 EMU_CALL spucore_dbg_voice_addr(void *state, uint32 voice) {
+  (void)state;
+  return g_dbg_addr[voice & 23];
+}
+
+void EMU_CALL spucore_set_wave_sink(void *state, SPUCORE_WAVE_SINK sink, void *user) {
+  (void)state;
+  g_wave_sink = sink;
+  g_wave_sink_user = user;
+}
 
 int16_t const* EMU_CALL spucore_dbg_waveform(void *state, uint32 voice) {
   (void)state;
