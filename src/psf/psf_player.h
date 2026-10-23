@@ -114,7 +114,6 @@ class PSFPlayer {
   mutable std::map<int, int> sample_ends_;     // start address -> end address
   mutable uint32_t key_on_seen_[kVoices];      // last KON counter seen
   mutable uint32_t last_wave_pos_[kVoices];    // waveform ring position seen
-  mutable uint32_t note_on_pos_[kVoices];      // ring position at the note-on
   mutable int wave_stall_[kVoices];            // frames without new samples
 };
 

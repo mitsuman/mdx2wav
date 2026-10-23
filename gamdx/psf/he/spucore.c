@@ -10,6 +10,14 @@
 
 #include "spucore.h"
 
+
+////////////////////////////////////////////////////////////////////////////////
+// Per-voice waveform capture used by the visualizer.  Kept outside of the core
+// state: the engine snapshots and restores that state (e.g. when it estimates
+// IRQ timing), which would otherwise reset the capture positions.
+static sint16 g_dbg_wave[24][2048];
+static uint32 g_dbg_wave_pos[24];
+
 ////////////////////////////////////////////////////////////////////////////////
 /*
 ** Key-on defer
@@ -398,8 +406,7 @@ struct SPUCORE_STATE {
   sint32 noiseval;
 
   // Per-voice output capture for the visualizer (added for mdx2wav).
-  sint16 dbg_wave[24][2048];
-  uint32 dbg_wave_pos[24];
+  sint16 dbg_wave_unused[1];
   uint32 irq_decoder_clock;
   uint32 irq_triggered_cycle;
 };
@@ -1768,7 +1775,7 @@ static void EMU_CALL render(struct SPUCORE_STATE *state, uint16 *ram, sint16 *bu
         else amp = q_l;
         if (amp > 32767) amp = 32767;
         if (amp < -32768) amp = -32768;
-        state->dbg_wave[ch][state->dbg_wave_pos[ch]++ & 2047] = (sint16)amp;
+        g_dbg_wave[ch][g_dbg_wave_pos[ch]++ & 2047] = (sint16)amp;
       }
       if(main_l) ibufmix[2*i+0] += q_l;
       if(main_r) ibufmix[2*i+1] += q_r;
@@ -2077,10 +2084,12 @@ void EMU_CALL spucore_setreg(void *state, uint32 n, uint32 value, uint32 mask) {
 */
 
 int16_t const* EMU_CALL spucore_dbg_waveform(void *state, uint32 voice) {
-  return SPUCORESTATE->dbg_wave[voice & 23];
+  (void)state;
+  return g_dbg_wave[voice & 23];
 }
 uint32 EMU_CALL spucore_dbg_wave_pos(void *state, uint32 voice) {
-  return SPUCORESTATE->dbg_wave_pos[voice & 23];
+  (void)state;
+  return g_dbg_wave_pos[voice & 23];
 }
 
 uint32 EMU_CALL spucore_getreg_voice(void *state, uint32 voice, uint32 n) {

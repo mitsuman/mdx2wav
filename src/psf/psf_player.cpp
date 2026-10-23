@@ -245,7 +245,6 @@ PSFPlayer::PSFPlayer()
   for (int i = 0; i < kVoices; i++) {
     key_on_seen_[i] = 0;
     last_wave_pos_[i] = 0;
-    note_on_pos_[i] = 0;
     wave_stall_[i] = 0;
   }
 }
@@ -577,18 +576,12 @@ void PSFPlayer::GetVoiceStates(VoiceState out[kVoices]) const {
     s.active = s.phase != 0;
     s.waveform_samples = 0;
 
-    if (s.note_on) note_on_pos_[v] = spu_dbg_wave_pos(spu, (uint32)v);
     if (s.active) {
       // Copy the captured per-voice output (the actual level used in the mix).
       const int ring_size = 2048;
       const int16_t* ring = spu_dbg_waveform(spu, (uint32)v);
       const uint32 pos = spu_dbg_wave_pos(spu, (uint32)v);
-      // Only show what has been captured since the note-on, so a short
-      // one-shot sample is stretched across the panel instead of being a
-      // dot at the right edge of an otherwise empty window.
-      uint32_t available = pos - note_on_pos_[v];
       int count = std::min((int)kWaveformSamples, ring_size);
-      if (available > 0 && (int)available < count) count = (int)available;
       for (int j = 0; j < count; j++) {
         s.waveform[j] = ring[(pos - count + j + ring_size) & (ring_size - 1)];
       }
