@@ -1505,38 +1505,12 @@ void Visualizer::renderPSF() {
             }
         }
 
-        // Captured per-voice waveform.
-        {
-            SDL_Rect area = {x + wave_x, y + wave_y_off, wave_w, wave_h};
-            SDL_SetRenderDrawColor(renderer_, 12, 12, 34, 255);
-            SDL_RenderFillRect(renderer_, &area);
-            SDL_SetRenderDrawColor(renderer_, 45, 50, 85, 255);
-            SDL_RenderDrawRect(renderer_, &area);
-
-            const int n = f.waveform_samples;
-            if (n > 1 && f.active) {
-                int peak = 1;
-                for (int i = 0; i < n; i++) {
-                    const int a = f.waveform[i] < 0 ? -f.waveform[i] : f.waveform[i];
-                    if (a > peak) peak = a;
-                }
-                const float scale = (wave_h * 0.45f) / (float)peak;
-                const int mid = y + wave_y_off + wave_h / 2;
-                SDL_SetRenderDrawColor(renderer_, sr, sg, sb, 220);
-                int prev_y = mid;
-                for (int px = 1; px < wave_w - 1; px++) {
-                    const int idx = (int)((long long)px * n / (wave_w - 2));
-                    int py = mid - (int)(f.waveform[idx] * scale);
-                    if (py < y + wave_y_off + 1) py = y + wave_y_off + 1;
-                    if (py > y + wave_y_off + wave_h - 2) {
-                        py = y + wave_y_off + wave_h - 2;
-                    }
-                    SDL_RenderDrawLine(renderer_, x + wave_x + px - 1, prev_y,
-                                       x + wave_x + px, py);
-                    prev_y = py;
-                }
-            }
-        }
+        // Captured per-voice waveform, drawn with the same renderer as the
+        // SPC panel so it gets the same phase lock and scale smoothing.
+        renderChannelWaveform(x + wave_x, y + wave_y_off, wave_w, wave_h,
+                              f.waveform, (f.active && f.waveform_samples > 1)
+                                  ? f.waveform_samples : 0,
+                              sr, sg, sb, v, 1.0f, true);
     }
 }
 
