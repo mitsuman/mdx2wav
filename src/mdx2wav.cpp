@@ -1015,6 +1015,11 @@ int main(int argc, char **argv) {
 
   short *audio_buf = new short [AUDIO_BUF_SAMPLES * 2];
 
+  // Holds the path of a file chosen from the history view.  It must live
+  // before the reload label: mdx_name points into it, and a goto back to the
+  // label must not leave its scope.
+  std::string requested_path_storage;
+
 #ifdef __APPLE__
   AudioContext audioCtx = {0};
   bool audio_queue_initialized = false;
@@ -1225,10 +1230,6 @@ reload_file:
     }
   }
 #endif
-
-  // Holds the path of a file chosen from the history view (mdx_name points
-  // into it until the next switch).
-  std::string requested_path_storage;
 
   // Main loop
   double total_audio_time = 0.0;  // 動画モード用: 累積オーディオ時間

@@ -192,10 +192,21 @@ public:
     // YM2151ミュート状態を取得
     bool isYM2151Muted() const { return ym2151_muted_; }
     
-    // 表示チャンネル数の設定
+    // 表示チャンネルの設定
+    //
+    // The layout height depends on the counts, and the window cannot grow when
+    // the format changes (e.g. a PSF-sized window playing an MDX next), so
+    // clamp the counts to what fits.
     void setDisplayChannels(int ym2151_channels, int adpcm_channels) {
-        ym2151_display_channels_ = (ym2151_channels > 0 && ym2151_channels <= 8) ? ym2151_channels : 8;
-        adpcm_display_channels_ = (adpcm_channels >= 0 && adpcm_channels <= 8) ? adpcm_channels : 8;
+        int fm = (ym2151_channels > 0 && ym2151_channels <= 8) ? ym2151_channels : 8;
+        int ad = (adpcm_channels >= 0 && adpcm_channels <= 8) ? adpcm_channels : 8;
+        if (!spc_mode_ && !psf_mode_ && window_height_ > 0) {
+            const int available = window_height_ - 75 - 20;
+            while (fm * 70 + ad * 45 > available && ad > 0) ad--;
+            while (fm * 70 + ad * 45 > available && fm > 1) fm--;
+        }
+        ym2151_display_channels_ = fm;
+        adpcm_display_channels_ = ad;
     }
     
     // 波形表示のスケール設定
