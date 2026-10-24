@@ -95,13 +95,10 @@ bool VgmFilePlayer::Load(const char* path, std::string* error) {
 
   // The audio itself comes from libvgm; our parser/synth only feeds the
   // visualizer below.
-  delete audio_;
-  audio_ = new LibVgmAudio();
+  if (!audio_) audio_ = new LibVgmAudio();
   std::string lib_error;
   if (!audio_->Load(path, &lib_error)) {
     if (error) *error = lib_error;
-    delete audio_;
-    audio_ = nullptr;
     return false;
   }
   const double lib_time = audio_->TotalTime();

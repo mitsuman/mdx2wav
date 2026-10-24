@@ -1,5 +1,6 @@
 #include "libvgm_backend.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "../../third_party/libvgm/player/playera.hpp"
@@ -23,28 +24,36 @@ LibVgmAudio::~LibVgmAudio() {
 }
 
 bool LibVgmAudio::Load(const char* path, std::string* error) {
-  PlayerA* player = new PlayerA();
-  VGMPlayer* engine = new VGMPlayer();
-  player->RegisterPlayerEngine(engine);
-  player->SetOutputSettings(44100, 2, 16, 4096);
+  PlayerA* player = static_cast<PlayerA*>(player_);
+  if (!player) {
+    player = new PlayerA();
+    VGMPlayer* engine = new VGMPlayer();
+    player->RegisterPlayerEngine(engine);
+    player->SetOutputSettings(44100, 2, 16, 4096);
+    player_ = player;
+    engine_ = engine;
+  } else {
+    // Reuse the player: unloading and loading again with the same instance is
+    // safe, while destroying a libvgm player after a song has been unloaded
+    // crashes.
+    player->UnloadFile();
+    if (loader_) {
+      DataLoader_Deinit(static_cast<DATA_LOADER*>(loader_));
+      loader_ = nullptr;
+    }
+  }
 
   DATA_LOADER* loader = FileLoader_Init(path);
   if (!loader || DataLoader_Load(loader)) {
     if (error) *error = "Cannot open VGM file";
-    delete player;
-    delete engine;
     if (loader) DataLoader_Deinit(loader);
     return false;
   }
   if (player->LoadFile(loader)) {
     if (error) *error = "libvgm cannot play this VGM";
-    delete player;
-    delete engine;
     DataLoader_Deinit(loader);
     return false;
   }
-  player_ = player;
-  engine_ = engine;
   loader_ = loader;
   finished_ = false;
   return true;
@@ -63,9 +72,10 @@ void LibVgmAudio::Start(int loop_count, double fade_seconds) {
 int LibVgmAudio::Render(int16_t* out, int frames) {
   PlayerA* player = static_cast<PlayerA*>(player_);
   if (!player || frames <= 0) return 0;
-  const UINT32 got = player->Render((UINT32)frames, out);
+  // PlayerA works in bytes: 2 channels * 16 bit = 4 bytes per frame.
+  const UINT32 got = player->Render((UINT32)frames * 4, out);
   if (got == 0) finished_ = true;
-  return (int)got;
+  return (int)(got / 4);
 }
 
 double LibVgmAudio::TotalTime() const {

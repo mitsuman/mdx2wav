@@ -46,7 +46,7 @@ static pthread_mutex_t g_spc_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
 static PSFPlayer* g_psf_audio_player = nullptr;
 static pthread_mutex_t g_psf_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static VGMPlayer* g_vgm_audio_player = nullptr;
+static VgmFilePlayer* g_vgm_audio_player = nullptr;
 static pthread_mutex_t g_vgm_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static int VgmAudioFill(short* out, int frames) {
@@ -1038,7 +1038,7 @@ int main(int argc, char **argv) {
 
   SPCPlayer* spc_player = nullptr;
   PSFPlayer* psf_player = nullptr;
-  VGMPlayer* vgm_player = nullptr;
+  VgmFilePlayer* vgm_player = nullptr;
   bool mdx_started = false;
 
   if (!is_spc && !is_psf && !is_vgm) {
@@ -1170,7 +1170,7 @@ reload_file:
 #endif
   } else if (is_vgm) {
     if (!vgm_player) {
-      vgm_player = new VGMPlayer();
+      vgm_player = new VgmFilePlayer();
 #ifdef __APPLE__
       g_vgm_audio_player = vgm_player;
 #endif
@@ -1364,7 +1364,7 @@ reload_file:
 #ifdef __APPLE__
           pthread_mutex_lock(&g_vgm_audio_mutex);
 #endif
-          VGMPlayer::VoiceState vs[VGMPlayer::kFmChannels];
+          VgmFilePlayer::VoiceState vs[VgmFilePlayer::kFmChannels];
           vgm_player->GetVoiceStates(vs);
 #ifdef __APPLE__
           pthread_mutex_unlock(&g_vgm_audio_mutex);
@@ -1385,7 +1385,7 @@ reload_file:
             }
             visualizer->setPSGStates(pv, 4);
           }
-          for (int ch = 0; ch < VGMPlayer::kFmChannels; ch++) {
+          for (int ch = 0; ch < VgmFilePlayer::kFmChannels; ch++) {
             int eg_out[4];
             int eg_phase[4];
             for (int op = 0; op < 4; op++) {
