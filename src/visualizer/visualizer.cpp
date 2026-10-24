@@ -2827,12 +2827,14 @@ void Visualizer::renderVGMPSG(int& y) {
                 const int note = 12 + o * 12 + kWhiteSemis[k];
                 const int kx = keyboard_x + (o * 7 + k) * white_w;
                 const bool pressed = i < 3 && v.active && v.note == note;
-                SDL_SetRenderDrawColor(renderer_, pressed ? 100 : 190,
-                                       pressed ? 255 : 190,
-                                       pressed ? 100 : 210, 255);
+                if (pressed) {
+                    SDL_SetRenderDrawColor(renderer_, 100, 180, 255, 255);
+                } else {
+                    SDL_SetRenderDrawColor(renderer_, 100, 105, 127, 255);
+                }
                 SDL_Rect key = {kx, keyboard_y, white_w - 1, white_h};
                 SDL_RenderFillRect(renderer_, &key);
-                SDL_SetRenderDrawColor(renderer_, 60, 65, 100, 255);
+                SDL_SetRenderDrawColor(renderer_, 60, 60, 120, 255);
                 SDL_RenderDrawRect(renderer_, &key);
                 if (k == 0) {
                     char oct[4];
@@ -2846,11 +2848,15 @@ void Visualizer::renderVGMPSG(int& y) {
                 const int kx = keyboard_x + (o * 7 + kBlackOffsets[k]) * white_w +
                                white_w - black_w / 2 - 1;
                 const bool pressed = i < 3 && v.active && v.note == note;
-                SDL_SetRenderDrawColor(renderer_, pressed ? 100 : 20,
-                                       pressed ? 255 : 22,
-                                       pressed ? 100 : 34, 255);
+                if (pressed) {
+                    SDL_SetRenderDrawColor(renderer_, 100, 180, 255, 255);
+                } else {
+                    SDL_SetRenderDrawColor(renderer_, 30, 30, 50, 255);
+                }
                 SDL_Rect key = {kx, keyboard_y, black_w, black_h};
                 SDL_RenderFillRect(renderer_, &key);
+                SDL_SetRenderDrawColor(renderer_, 60, 60, 120, 255);
+                SDL_RenderDrawRect(renderer_, &key);
             }
         }
 
