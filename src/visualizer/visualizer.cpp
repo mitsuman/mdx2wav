@@ -110,6 +110,7 @@ Visualizer::Visualizer()
     , current_file_index_(0)
     , psf_mode_(false)
     , vgm_mode_(false)
+    , zmd_mode_(false)
     , psg_voice_count_(0)
     , vgm_dac_used_(false)
     , sample_rate_(44100)
@@ -2459,6 +2460,8 @@ void Visualizer::renderTimerInfo() {
     // システム情報を表示（TIMER-Aと同じ行）
     if (vgm_mode_) {
         renderBitmapText("SEGA MEGA DRIVE / YM2612 + SN76489 / VGM playback by mdx2wav", x, y, 100, 140, 200);
+    } else if (zmd_mode_) {
+        renderBitmapText("SHARP X68000 / Z-MUSIC SYSTEM Ver.2.08 / mdx2wav 20251225 by mtm", x, y, 100, 140, 200);
     } else {
         renderBitmapText("SHARP X68000 / MXDRV 2.06+17 Rel.X5-S / MXDRVg V1.50a / mdx2wav 20251225 by mtm", x, y, 100, 140, 200);
     }

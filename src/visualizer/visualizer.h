@@ -166,6 +166,9 @@ public:
     };
     void setPSFMode(bool enabled);
     void setVGMMode(bool enabled) { vgm_mode_ = enabled; }
+    // Z-MUSIC (ZMD) uses the MDX layout but reports its own driver version.
+    void setZMDMode(bool enabled) { zmd_mode_ = enabled; }
+    bool isZMDMode() const { return zmd_mode_; }
     // The DAC and FM channel 6 share the same hardware, so the DAC row is only
     // shown for songs that actually use it.
     void setVGMDacUsed(bool used) { vgm_dac_used_ = used; }
@@ -331,6 +334,7 @@ private:
     // ファイルリスト管理
     bool psf_mode_;
     bool vgm_mode_;
+    bool zmd_mode_;
     PSGVoice psg_voices_[4];
     int psg_voice_count_;
     DACVoice dac_voice_;

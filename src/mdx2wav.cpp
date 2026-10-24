@@ -1173,6 +1173,7 @@ int main(int argc, char **argv) {
     visualizer->setSPCMode(is_spc);
     visualizer->setPSFMode(is_psf);
     visualizer->setVGMMode(is_vgm);
+    visualizer->setZMDMode(is_zmd);
     visualizer->setVGMDacUsed(vgm_dac_used);
 
     // 表示チャンネル数を設定
@@ -1310,6 +1311,7 @@ reload_file:
     visualizer->setSPCMode(is_spc);
     visualizer->setPSFMode(is_psf);
     visualizer->setVGMMode(is_vgm);
+    visualizer->setZMDMode(is_zmd);
     visualizer->setVGMDacUsed(vgm_dac_used);
     visualizer->setDisplayChannels(is_spc ? 8 : ym2151_channels,
                                   is_spc ? 0 : adpcm_channels);
