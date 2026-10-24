@@ -172,6 +172,7 @@ public:
         bool active;
         int note;
         int volume;       // attenuation 0..15
+        bool white_noise; // noise channel mode
         int16_t waveform[1024];
         int waveform_samples;
     };

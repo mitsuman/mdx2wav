@@ -16,6 +16,7 @@ class SN76489 {
     int note;        // MIDI note (tone channels), -1 for noise
     int period;
     int volume;      // attenuation 0..15
+    bool white_noise; // noise channel: white (true) or periodic (false)
     int16_t waveform[kWaveformSamples];
   };
 

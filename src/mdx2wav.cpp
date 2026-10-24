@@ -1377,6 +1377,7 @@ reload_file:
               pv[q].active = ps[q].active;
               pv[q].note = ps[q].note;
               pv[q].volume = ps[q].volume;
+              pv[q].white_noise = ps[q].white_noise;
               pv[q].waveform_samples = SN76489::kWaveformSamples;
               for (int j = 0; j < SN76489::kWaveformSamples; j++) {
                 pv[q].waveform[j] = ps[q].waveform[j];

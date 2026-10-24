@@ -2761,9 +2761,17 @@ void Visualizer::renderChannelInfo() {
 
 void Visualizer::renderVGMPSG(int& y) {
     const int row_h = 45;
-    const int wave_x = 800;
-    const int wave_w = 256;
-    const int wave_h = 40;
+    const int white_w = WHITE_KEY_WIDTH;
+    const int white_h = 32;
+    const int black_w = 6;
+    const int black_h = 21;
+    const int keyboard_x = KEYBOARD_START_X;
+    const int wave_x = channelWaveformX();
+    const int wave_w = channelWaveformWidth();
+    const int wave_h = 41;
+    static const int kWhiteSemis[7] = {0, 2, 4, 5, 7, 9, 11};
+    static const int kBlackSemis[5] = {1, 3, 6, 8, 10};
+    static const int kBlackOffsets[5] = {0, 1, 3, 4, 5};
 
     for (int i = 0; i < psg_voice_count_; i++) {
         const PSGVoice& v = psg_voices_[i];
@@ -2775,6 +2783,24 @@ void Visualizer::renderVGMPSG(int& y) {
         renderBitmapText("PSG", 10, y + 23, seg_r, seg_g, seg_b);
         renderBitmapText("SN76489", 10, y + 31, seg_r / 2, seg_g / 2, seg_b / 2);
 
+        // Volume bar, same style as the ADPCM rows.
+        const int vol_x = 70;
+        const int vol_y = y + 5;
+        const int vol_w = 10;
+        const int vol_h = 32;
+        SDL_SetRenderDrawColor(renderer_, 40, 40, 55, 255);
+        SDL_Rect vol_bg = {vol_x, vol_y, vol_w, vol_h};
+        SDL_RenderFillRect(renderer_, &vol_bg);
+        const int level = std::max(0, std::min(15, 15 - v.volume));
+        if (level > 0) {
+            const int h = vol_h * level / 15;
+            SDL_SetRenderDrawColor(renderer_, v.active ? 120 : 60,
+                                   v.active ? 200 : 80,
+                                   v.active ? 255 : 120, 255);
+            SDL_Rect bar = {vol_x, vol_y + vol_h - h, vol_w, h};
+            SDL_RenderFillRect(renderer_, &bar);
+        }
+
         char text[64];
         if (i < 3 && v.note >= 0 && v.note <= 127) {
             snprintf(text, sizeof(text), "NOTE %s%d", getNoteName(v.note),
@@ -2782,14 +2808,51 @@ void Visualizer::renderVGMPSG(int& y) {
         } else if (i < 3) {
             snprintf(text, sizeof(text), "NOTE ---");
         } else {
-            snprintf(text, sizeof(text), "NOISE");
+            snprintf(text, sizeof(text), "NOISE %s", v.white_noise ? "WHITE" : "PERIODIC");
         }
-        renderBitmapText(text, 42, y + 4, v.active ? 120 : 55,
+        renderBitmapText(text, 86, y + 4, v.active ? 120 : 55,
                          v.active ? 200 : 70, v.active ? 255 : 95);
 
         snprintf(text, sizeof(text), "VOL %X", 15 - v.volume);
-        renderBitmapText(text, 42, y + 14, v.active ? 170 : 50,
+        renderBitmapText(text, 86, y + 14, v.active ? 170 : 50,
                          v.active ? 175 : 55, v.active ? 220 : 80);
+        renderBitmapText(i < 3 ? "TONE" : "NOISE", 86, y + 24,
+                         v.active ? 150 : 50, v.active ? 170 : 60,
+                         v.active ? 220 : 80);
+
+        // Keyboard (tone channels highlight the note; noise has none).
+        const int keyboard_y = y + 4;
+        for (int o = 0; o < 8; o++) {
+            for (int k = 0; k < 7; k++) {
+                const int note = 12 + o * 12 + kWhiteSemis[k];
+                const int kx = keyboard_x + (o * 7 + k) * white_w;
+                const bool pressed = i < 3 && v.active && v.note == note;
+                SDL_SetRenderDrawColor(renderer_, pressed ? 100 : 190,
+                                       pressed ? 255 : 190,
+                                       pressed ? 100 : 210, 255);
+                SDL_Rect key = {kx, keyboard_y, white_w - 1, white_h};
+                SDL_RenderFillRect(renderer_, &key);
+                SDL_SetRenderDrawColor(renderer_, 60, 65, 100, 255);
+                SDL_RenderDrawRect(renderer_, &key);
+                if (k == 0) {
+                    char oct[4];
+                    snprintf(oct, sizeof(oct), "%d", o);
+                    renderBitmapText(oct, kx + 2, keyboard_y + white_h + 2,
+                                     90, 110, 170);
+                }
+            }
+            for (int k = 0; k < 5; k++) {
+                const int note = 12 + o * 12 + kBlackSemis[k];
+                const int kx = keyboard_x + (o * 7 + kBlackOffsets[k]) * white_w +
+                               white_w - black_w / 2 - 1;
+                const bool pressed = i < 3 && v.active && v.note == note;
+                SDL_SetRenderDrawColor(renderer_, pressed ? 100 : 20,
+                                       pressed ? 255 : 22,
+                                       pressed ? 100 : 34, 255);
+                SDL_Rect key = {kx, keyboard_y, black_w, black_h};
+                SDL_RenderFillRect(renderer_, &key);
+            }
+        }
 
         renderChannelWaveform(wave_x, y + 2, wave_w, wave_h, v.waveform,
                               v.active ? v.waveform_samples : 0, 120, 200, 255,

@@ -91,6 +91,7 @@ void SN76489::GetStates(ChannelState out[kChannels]) const {
     s.period = (i < 3) ? tone_[i].period : 0;
     s.volume = (i < 3) ? tone_[i].volume : noise_.volume;
     s.active = s.volume < 15;
+    s.white_noise = noise_white_;
     if (i < 3) {
       const double freq = (double)clock_ / (32.0 * (double)(s.period ? s.period : 1));
       const double note = 69.0 + 12.0 * log2(freq / 440.0);
