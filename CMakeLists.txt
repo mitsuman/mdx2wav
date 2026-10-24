@@ -14,6 +14,8 @@ set(CMAKE_CXX_FLAGS_DEBUG "-Wall -g")
 set(MDX2WAV_SOURCES
 	src/mdx2wav.cpp
 	src/command_line_parser.cpp
+	src/zmd/zmd_player.cpp
+	src/zmd/msm6258.cpp
 	gamdx/downsample/downsample.cpp
 	gamdx/fmgen/fmgen.cpp
 	gamdx/fmgen/fmtimer.cpp

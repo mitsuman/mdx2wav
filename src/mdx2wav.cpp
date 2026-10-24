@@ -18,6 +18,7 @@
 #include "spc/spc_player.h"
 #include "psf/psf_player.h"
 #include "vgm/vgm_player.h"
+#include "zmd/zmd_player.h"
 
 #ifdef __APPLE__
 #include "platform_mac.h"
@@ -385,6 +386,14 @@ std::string readMusicTitle(const std::string& path) {
       while (len < 32 && 0x2E + len < got && head[0x2E + len] != 0) len++;
       title.assign((const char*)head + 0x2E, len);
     }
+  } else if (ends_with(".zmd")) {
+    // ZMD: 0x10 "ZmuSiC" version, then common commands.  The first command
+    // of the files we care about is a 0x7F comment string.
+    if (got > 10 && head[8] == 0x7F) {
+      size_t len = 0;
+      while (9 + len < got && head[9 + len] != 0) len++;
+      title.assign((const char*)head + 9, len);
+    }
   } else {
     // MDX: the title is the plain text after the 10-byte header, ended by CR LF.
     for (size_t i = MAGIC_OFFSET; i < got; i++) {
@@ -425,6 +434,7 @@ bool hasMusicExtension(const char* name) {
   if (len > 4 && strcasecmp(name + len - 4, ".psf") == 0) return true;
   if (len > 8 && strcasecmp(name + len - 8, ".minipsf") == 0) return true;
   if (len > 4 && strcasecmp(name + len - 4, ".vgm") == 0) return true;
+  if (len > 4 && strcasecmp(name + len - 4, ".zmd") == 0) return true;
   return false;
 }
 
@@ -728,8 +738,8 @@ void version() {
 
 void help() {
   printf(
-    "Usage: mdx2wav [options] <file.mdx|file.spc|file.psf>\n"
-    "Convert an MDX, SPC or PSF music file to 16bit stereo raw pcm on stdout.\n"
+    "Usage: mdx2wav [options] <file.mdx|file.zmd|file.spc|file.psf>\n"
+    "Convert an MDX, ZMD, SPC, PSF or VGM music file to 16bit stereo raw pcm on stdout.\n"
     " if you need to convert to other format, use ffmpeg like a following.\n"
     "  mdx2wav xxx.mdx | ffmpeg -f s16le -ar 44.1k -ac 2 -i - xxx.wav\n"
     " if you want to listen now, use aplay like a following.\n"
@@ -766,10 +776,99 @@ void help() {
     "  -V        : verbose, write debug log to stderr.\n"
     "  --volume <n>        : set volume multiplier (0.0-2.0, default:1.0).\n"
     "  --swap-channels     : swap left/right audio channels.\n"
+    "\n"
+    "  ZMD (Z-MUSIC) input is rendered by the built-in C++ FM port.\n"
+    "  ZPD ADPCM samples are supported; the SDL2 visualizer is not.\n"
     );
 }
 
 
+
+
+static bool is_zmd_path(const char* path) {
+  const size_t len = strlen(path);
+  return len > 4 && strcasecmp(path + len - 4, ".zmd") == 0;
+}
+
+// ZMD is rendered by the C++ Z-MUSIC port.  It currently has its own output
+// path (raw S16LE stereo on stdout), because the MXDRVG/MDX visualizer state
+// is not shared with the ZMD engine.
+static int run_zmd_file(const char* path, const CommandLineOptions& opt) {
+  ZmdPlayer player;
+  player.SetSampleRate(opt.sample_rate);
+  std::string error;
+  if (!player.LoadFile(path, &error)) {
+    fprintf(stderr, "Cannot load ZMD %s: %s\n", path, error.c_str());
+    return -1;
+  }
+  player.SetLoopCount(opt.loop);
+  if (player.HasAdpcm() && !player.AdpcmReady()) {
+    std::string warning = player.AdpcmWarning();
+    if (warning.empty()) warning = "no ADPCM sample was registered";
+    fprintf(stderr,
+            "note: this ZMD contains ADPCM commands but no sample could be "
+            "loaded (%s); FM tracks are rendered.\n",
+            warning.c_str());
+  }
+  if (opt.get_title) {
+    fputs(player.Title().c_str(), stdout);
+    fputc('\n', stdout);
+    return 0;
+  }
+
+  const double measured = player.MeasureSeconds(3600.0);
+  if (opt.measure_play_time) {
+    printf("%d\n", (int)ceil(measured));
+    return 0;
+  }
+
+  double duration = measured;
+  const double limit = opt.max_song_duration > 0.0f ? opt.max_song_duration : 0.0;
+  if (limit > 0.0 && duration > limit) duration = limit;
+
+  player.Start();
+  const int frames_per_chunk = std::max(1, opt.sample_rate / 100);
+  std::vector<int16_t> buf((size_t)frames_per_chunk * 2);
+  const long long max_frames = duration > 0.0
+                                   ? (long long)(duration * opt.sample_rate)
+                                   : (long long)opt.max_song_duration *
+                                         opt.sample_rate;
+  const double fade_len = opt.fadeout ? 3.0 : 0.0;
+  const double fade_start = (fade_len > 0.0) ? std::max(0.0, duration - fade_len) : 0.0;
+
+  long long rendered = 0;
+  while (rendered < max_frames) {
+    int want = frames_per_chunk;
+    if (max_frames - rendered < want) want = (int)(max_frames - rendered);
+    const int n = player.Generate(buf.data(), want);
+    if (n <= 0) break;
+
+    if (opt.swap_channels) {
+      for (int i = 0; i < n; i++) std::swap(buf[i * 2], buf[i * 2 + 1]);
+    }
+
+    const double t = (double)rendered / opt.sample_rate;
+    double fade = 1.0;
+    if (fade_len > 0.0 && t >= fade_start) {
+      fade = 1.0 - (t - fade_start) / fade_len;
+      if (fade < 0.0) fade = 0.0;
+    }
+    // Leave a little headroom: eight FM channels can otherwise hit 0 dBFS
+    // on loud songs (a handful of clipped samples in Mu2_dofight).
+    const double gain = (double)opt.volume * fade * 0.9;
+    if (gain != 1.0) {
+      for (int i = 0; i < n * 2; i++) {
+        int v = (int)lrint(buf[i] * gain);
+        if (v > 32767) v = 32767;
+        if (v < -32768) v = -32768;
+        buf[i] = (int16_t)v;
+      }
+    }
+    fwrite(buf.data(), sizeof(int16_t), (size_t)n * 2, stdout);
+    rendered += n;
+  }
+  return 0;
+}
 
 int main(int argc, char **argv) {
   CommandLineOptions options;
@@ -876,6 +975,16 @@ int main(int argc, char **argv) {
   bool is_psf = !is_spc && is_psf_path(mdx_name);
   bool is_vgm = !is_spc && !is_psf && is_vgm_path(mdx_name);
   bool vgm_dac_used = false;
+
+  if (!is_spc && !is_psf && !is_vgm && is_zmd_path(mdx_name)) {
+    if (play_audio || enable_visualizer) {
+      fprintf(stderr,
+              "ZMD playback currently supports file output only; "
+              "run without -p/-g/--video and pipe stdout to a WAV encoder.\n");
+      return -1;
+    }
+    return run_zmd_file(mdx_name, options);
+  }
 
   // Recently played files, persisted between runs (up to 1024).
   std::vector<std::string> history = loadHistory();

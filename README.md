@@ -1,6 +1,7 @@
 # mdx2wav
 
-mdx2wav is a converter to make raw pcm data from MDX and SPC music files.
+mdx2wav is a converter to make raw pcm data from MDX, ZMD (Z-MUSIC), SPC,
+PSF and VGM music files.
 
 MDX is a major sound format of Sharp X68000 in the 1990s.  SPC is the
 SNES APU dump format, containing an SPC700 program and S-DSP state; it is
@@ -30,8 +31,35 @@ mdx2wav -t song.spc                 # ID666 title
 The S-DSP runs at 32 kHz and is band-limited upsampled to the requested rate
 (44.1 kHz by default).  SPC has no reliable song-length field, so playback is
 capped by `-d` (default 300 s); the ID666 "seconds until fadeout" value is used
-when present.  `-l` is an MDX-only option because the SPC program controls its
-own looping.
+when present.  `-l` applies to MDX and ZMD; SPC/PSF/VGM control their own
+looping.
+
+### Z-MUSIC (ZMD)
+
+`.zmd` files (Z-MUSIC SYSTEM Ver.2) are rendered by the built-in C++ port in
+`src/zmd/`.  It is based on the original Z-MUSIC source by Zenji Nishikawa
+(西川善司), as published at <https://github.com/kg68k/zmusic2> (the `unified/`
+Ver.2.08 tree).  Usage is the same as MDX:
+
+```shell
+mdx2wav song.zmd | ffmpeg -f s16le -ar 44.1k -ac 2 -i - song.wav
+mdx2wav -l 1 song.zmd | ffmpeg -f s16le -ar 44.1k -ac 2 -i - song.wav
+mdx2wav -m song.zmd        # measured length in seconds
+mdx2wav -t song.zmd        # ZMD comment (Shift-JIS)
+```
+
+Implemented: the ZMD common commands (voice bank, tempo, comment), eight FM
+tracks with notes/rests, ties, voice change, volume, pan, detune/transpose,
+tempo changes, `C1`/`C2` repeats, `C3`/`C4` endings, `DO`/`LOOP`, and the
+software pitch/amplitude LFO.  YM2151 output uses the existing fmgen core.
+The built-in MSM6258 ADPCM channel is also playable from ZPD samples
+(`$40`/`$9B`/`$A2`/`$A9`/`$B7`/`$B8`), resampled at 3.9–15.6 kHz.
+
+Not implemented yet: ZPD registration-time mixing and fade processing, P16/
+PCM8 sample formats, `-p` direct playback and the SDL2 visualizer, and the
+rare `D.C.`/`D.S.`/`CODA` flow commands.  The Metal Unit II tracks use FM
+only, so they render completely; `-l`, `-d`, `-f`, `-m`, `-t`, `--volume` and
+`--swap-channels` work.
 
 ### Options
 
@@ -39,7 +67,7 @@ own looping.
   -d <sec>  : limit song duration. 0 means nolimit. (default:300)
   -e <type> : set ym2151 emulation type, fmgen or mame. (default:fmgen)
   -f        : enable fadeout.
-  -l <loop> : set loop limit. (default:2, MDX only)
+  -l <loop> : set loop limit. (default:2, MDX/ZMD)
   -m        : measure play time as sec.
   -r <rate> : set sampling rate. (default:44100)
   -t        : get song title (charset is SHIFT-JIS; SPC ID666 tags are raw).
