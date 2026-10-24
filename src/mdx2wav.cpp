@@ -728,6 +728,12 @@ int main(int argc, char **argv) {
   int filter_mode = options.filter_mode;
 
   bool measure_play_time = options.measure_play_time;
+  if (measure_play_time && !options.video_filename.empty()) {
+    fprintf(stderr,
+            "note: -m only prints the play time; ignoring it because --video "
+            "was given.  Use -d <sec> to limit the video length.\n");
+    measure_play_time = false;
+  }
   bool get_title = options.get_title;
   bool play_audio = options.play_audio;
   bool enable_visualizer = options.enable_visualizer;
@@ -815,6 +821,8 @@ int main(int argc, char **argv) {
   OPMVisualizer* opm_wrapper = nullptr;
   PCM8Visualizer* pcm8_wrapper = nullptr;
 
+  const bool visualizer_wanted = enable_visualizer && !measure_play_time;
+
   // ファイルリストを準備（ビジュアライザー用）
   std::vector<std::string> file_list;
   std::vector<std::string> file_titles;
@@ -841,7 +849,7 @@ int main(int argc, char **argv) {
     for (const auto& t : file_titles) title_ptrs.push_back(t.c_str());
   };
 
-  if (enable_visualizer) {
+  if (visualizer_wanted) {
     // Absolute path so the filer's parent-directory navigation is stable.
     rebuildFileList(canonicalPath(musicDirectory(mdx_name)));
 
