@@ -55,6 +55,47 @@ static pthread_mutex_t g_psf_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
 static VgmFilePlayer* g_vgm_audio_player = nullptr;
 static pthread_mutex_t g_vgm_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+static ZmdPlayer* g_zmd_audio_player = nullptr;
+static pthread_mutex_t g_zmd_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
+static double g_zmd_audio_gain = 1.0;
+static double g_zmd_fade_start = -1.0;
+static double g_zmd_fade_len = 0.0;
+static double g_zmd_elapsed = 0.0;
+static int g_zmd_audio_rate = 44100;
+
+static int ZmdAudioFill(short* out, int frames) {
+  if (g_song_paused) {
+    memset(out, 0, (size_t)frames * 4);
+    return frames;
+  }
+  pthread_mutex_lock(&g_zmd_audio_mutex);
+  int len = 0;
+  if (g_zmd_audio_player && !g_zmd_audio_player->IsFinished()) {
+    len = g_zmd_audio_player->Generate((int16_t*)out, frames);
+  }
+  if (len > 0) {
+    double fade = 1.0;
+    if (g_zmd_fade_len > 0.0 && g_zmd_elapsed >= g_zmd_fade_start) {
+      fade = 1.0 - (g_zmd_elapsed - g_zmd_fade_start) / g_zmd_fade_len;
+      if (fade < 0.0) fade = 0.0;
+    }
+    const double gain = g_zmd_audio_gain * fade;
+    if (gain != 1.0) {
+      for (int i = 0; i < len * 2; i++) {
+        int v = (int)lrint(out[i] * gain);
+        if (v > 32767) v = 32767;
+        if (v < -32768) v = -32768;
+        out[i] = (short)v;
+      }
+    }
+    if (g_zmd_audio_rate > 0) {
+      g_zmd_elapsed += (double)len / g_zmd_audio_rate;
+    }
+  }
+  pthread_mutex_unlock(&g_zmd_audio_mutex);
+  return len;
+}
+
 static int VgmAudioFill(short* out, int frames) {
   if (g_song_paused) {
     memset(out, 0, (size_t)frames * 4);
@@ -720,6 +761,43 @@ static void DetectMDXChannels(const char* path, int sample_rate, int filter_mode
   delete opm;
   delete pcm8;
 }
+
+// Adapts a ZmdPlayer's FM::OPM to the OPM_Delegate interface so the existing
+// OPMVisualizer (register mirroring, mute and keyboard) can be reused.
+class ZmdOpmBridge : public OPM_Delegate {
+ public:
+  explicit ZmdOpmBridge(ZmdPlayer* player) : player_(player) {}
+
+  void Reset() override {}
+  bool Count(int32 us) override { return false; }
+  int32 GetNextEvent() override { return 0x100000; }
+  bool Init(uint c, uint r, bool filter = false) override { return false; }
+  void SetReg(uint addr, uint data) override {
+    if (player_) player_->WriteOpmDirect((uint8_t)addr, (uint8_t)data);
+  }
+  uint ReadStatus() override { return 0; }
+  void Mix(short* buffer, int nsamples) override {}
+  void SetVolume(int db) override {}
+  void SetIrqCallback(CALLBACK* callback) override {}
+  void* GetOPMPointer() override {
+    return player_ ? player_->OpmPointer() : nullptr;
+  }
+
+ private:
+  ZmdPlayer* player_;
+};
+
+// The ZMD window uses the same layout as MDX.  Inspect the track table (no
+// rendering) so a song that only uses a few FM channels gets a small window.
+static void DetectZmdChannels(const char* path, int* fm_used, int* adpcm_used) {
+  *fm_used = 0;
+  *adpcm_used = 0;
+  ZmdPlayer player;
+  std::string error;
+  if (!player.LoadFile(path, &error)) return;
+  *fm_used = player.UsedFmChannels();
+  *adpcm_used = player.HasAdpcm() ? 1 : 0;
+}
 #endif
 
 void version() {
@@ -759,9 +837,10 @@ void help() {
     "  --waveform-scale <n>: set waveform amplitude scale (0.1-10.0, default:1.0).\n"
     "  --spectrum          : show the spectrum analyzer (off by default; wider window).\n"
     "  --no-auto-size      : keep the default window size instead of fitting it to the\n"
-    "                        channels the MDX song actually uses.\n"
+    "                        channels the song actually uses.\n"
 #endif
-    "  -l <loop> : set loop limit. (default:2, MDX only; SPC loops are controlled by the SPC program)\n"
+    "  -l <loop> : set loop limit. (default:2, MDX/ZMD; SPC/PSF/VGM loops are\n"
+    "              controlled by the file itself)\n"
     "  -m        : measure play time as sec.\n"
     "  --psf-bios <file> : PS1 BIOS image used for .psf playback.  Also read from\n"
     "              $PSF_BIOS, ./psx-bios.bin or ~/.config/mdx2wav/psx-bios.bin.\n"
@@ -778,7 +857,7 @@ void help() {
     "  --swap-channels     : swap left/right audio channels.\n"
     "\n"
     "  ZMD (Z-MUSIC) input is rendered by the built-in C++ FM port.\n"
-    "  ZPD ADPCM samples are supported; the SDL2 visualizer is not.\n"
+    "  ZPD ADPCM samples are supported and use the same visualizer as MDX.\n"
     );
 }
 
@@ -788,86 +867,6 @@ void help() {
 static bool is_zmd_path(const char* path) {
   const size_t len = strlen(path);
   return len > 4 && strcasecmp(path + len - 4, ".zmd") == 0;
-}
-
-// ZMD is rendered by the C++ Z-MUSIC port.  It currently has its own output
-// path (raw S16LE stereo on stdout), because the MXDRVG/MDX visualizer state
-// is not shared with the ZMD engine.
-static int run_zmd_file(const char* path, const CommandLineOptions& opt) {
-  ZmdPlayer player;
-  player.SetSampleRate(opt.sample_rate);
-  std::string error;
-  if (!player.LoadFile(path, &error)) {
-    fprintf(stderr, "Cannot load ZMD %s: %s\n", path, error.c_str());
-    return -1;
-  }
-  player.SetLoopCount(opt.loop);
-  if (player.HasAdpcm() && !player.AdpcmReady()) {
-    std::string warning = player.AdpcmWarning();
-    if (warning.empty()) warning = "no ADPCM sample was registered";
-    fprintf(stderr,
-            "note: this ZMD contains ADPCM commands but no sample could be "
-            "loaded (%s); FM tracks are rendered.\n",
-            warning.c_str());
-  }
-  if (opt.get_title) {
-    fputs(player.Title().c_str(), stdout);
-    fputc('\n', stdout);
-    return 0;
-  }
-
-  const double measured = player.MeasureSeconds(3600.0);
-  if (opt.measure_play_time) {
-    printf("%d\n", (int)ceil(measured));
-    return 0;
-  }
-
-  double duration = measured;
-  const double limit = opt.max_song_duration > 0.0f ? opt.max_song_duration : 0.0;
-  if (limit > 0.0 && duration > limit) duration = limit;
-
-  player.Start();
-  const int frames_per_chunk = std::max(1, opt.sample_rate / 100);
-  std::vector<int16_t> buf((size_t)frames_per_chunk * 2);
-  const long long max_frames = duration > 0.0
-                                   ? (long long)(duration * opt.sample_rate)
-                                   : (long long)opt.max_song_duration *
-                                         opt.sample_rate;
-  const double fade_len = opt.fadeout ? 3.0 : 0.0;
-  const double fade_start = (fade_len > 0.0) ? std::max(0.0, duration - fade_len) : 0.0;
-
-  long long rendered = 0;
-  while (rendered < max_frames) {
-    int want = frames_per_chunk;
-    if (max_frames - rendered < want) want = (int)(max_frames - rendered);
-    const int n = player.Generate(buf.data(), want);
-    if (n <= 0) break;
-
-    if (opt.swap_channels) {
-      for (int i = 0; i < n; i++) std::swap(buf[i * 2], buf[i * 2 + 1]);
-    }
-
-    const double t = (double)rendered / opt.sample_rate;
-    double fade = 1.0;
-    if (fade_len > 0.0 && t >= fade_start) {
-      fade = 1.0 - (t - fade_start) / fade_len;
-      if (fade < 0.0) fade = 0.0;
-    }
-    // Leave a little headroom: eight FM channels can otherwise hit 0 dBFS
-    // on loud songs (a handful of clipped samples in Mu2_dofight).
-    const double gain = (double)opt.volume * fade * 0.9;
-    if (gain != 1.0) {
-      for (int i = 0; i < n * 2; i++) {
-        int v = (int)lrint(buf[i] * gain);
-        if (v > 32767) v = 32767;
-        if (v < -32768) v = -32768;
-        buf[i] = (int16_t)v;
-      }
-    }
-    fwrite(buf.data(), sizeof(int16_t), (size_t)n * 2, stdout);
-    rendered += n;
-  }
-  return 0;
 }
 
 int main(int argc, char **argv) {
@@ -974,17 +973,8 @@ int main(int argc, char **argv) {
   bool is_spc = is_spc_path(mdx_name);
   bool is_psf = !is_spc && is_psf_path(mdx_name);
   bool is_vgm = !is_spc && !is_psf && is_vgm_path(mdx_name);
+  bool is_zmd = !is_spc && !is_psf && !is_vgm && is_zmd_path(mdx_name);
   bool vgm_dac_used = false;
-
-  if (!is_spc && !is_psf && !is_vgm && is_zmd_path(mdx_name)) {
-    if (play_audio || enable_visualizer) {
-      fprintf(stderr,
-              "ZMD playback currently supports file output only; "
-              "run without -p/-g/--video and pipe stdout to a WAV encoder.\n");
-      return -1;
-    }
-    return run_zmd_file(mdx_name, options);
-  }
 
   // Recently played files, persisted between runs (up to 1024).
   std::vector<std::string> history = loadHistory();
@@ -1003,6 +993,8 @@ int main(int argc, char **argv) {
   OPM_Delegate* opm_original = nullptr;
   OPMVisualizer* opm_wrapper = nullptr;
   PCM8Visualizer* pcm8_wrapper = nullptr;
+  ZmdOpmBridge* zmd_bridge = nullptr;
+  OPMVisualizer* zmd_opm_wrapper = nullptr;
 
   const bool visualizer_wanted = enable_visualizer && !measure_play_time;
 
@@ -1081,6 +1073,7 @@ int main(int argc, char **argv) {
     is_spc = is_spc_path(mdx_name);
     is_psf = !is_spc && is_psf_path(mdx_name);
     is_vgm = !is_spc && !is_psf && is_vgm_path(mdx_name);
+    is_zmd = !is_spc && !is_psf && !is_vgm && is_zmd_path(mdx_name);
     vgm_dac_used = is_vgm && vgmUsesDac(mdx_name);
 
     // YM2151状態管理オブジェクト作成
@@ -1097,6 +1090,19 @@ int main(int argc, char **argv) {
     if (is_spc) {
       ym2151_channels = 8;
       adpcm_channels = 0;
+    } else if (is_zmd) {
+      // Same layout as MDX; Z-MUSIC has one built-in MSM6258 ADPCM voice.
+      int fm_used = 8, adpcm_used = 0;
+      DetectZmdChannels(mdx_name, &fm_used, &adpcm_used);
+      if (!options.no_auto_size && !get_title && !measure_play_time &&
+          fm_used > 0 && fm_used < ym2151_channels) {
+        ym2151_channels = fm_used;
+      }
+      if (adpcm_used < adpcm_channels) adpcm_channels = adpcm_used;
+      if (verbose) {
+        fprintf(stderr, "auto size: FM %d ch, ADPCM %d ch\n",
+                ym2151_channels, adpcm_channels);
+      }
     } else if (!is_psf && !is_vgm && !options.no_auto_size && !get_title &&
                !measure_play_time) {
       // Fit the window to the channels the song really uses.
@@ -1151,7 +1157,9 @@ int main(int argc, char **argv) {
       init_success = visualizer->init(
           is_spc ? "SPC Visualizer"
                  : (is_psf ? "PSF Visualizer"
-                           : (is_vgm ? "VGM Visualizer" : "MDX Visualizer")),
+                           : (is_vgm ? "VGM Visualizer"
+                                     : (is_zmd ? "ZMD Visualizer"
+                                               : "MDX Visualizer"))),
           window_width, window_height);
       if (!init_success) {
         fprintf(stderr, "Failed to initialize visualizer\n");
@@ -1233,9 +1241,10 @@ int main(int argc, char **argv) {
   SPCPlayer* spc_player = nullptr;
   PSFPlayer* psf_player = nullptr;
   VgmFilePlayer* vgm_player = nullptr;
+  ZmdPlayer* zmd_player = nullptr;
   bool mdx_started = false;
 
-  if (!is_spc && !is_psf && !is_vgm) {
+  if (!is_spc && !is_psf && !is_vgm && !is_zmd) {
     MXDRVG_Start(SAMPLE_RATE, filter_mode, MDX_BUF_SIZE, PDX_BUF_SIZE);
     MXDRVG_TotalVolume(256);
     mdx_started = true;
@@ -1250,6 +1259,15 @@ int main(int argc, char **argv) {
   // before the reload label: mdx_name points into it, and a goto back to the
   // label must not leave its scope.
   std::string requested_path_storage;
+
+  // Measured by ZmdPlayer::MeasureSeconds() during reload.
+  double zmd_measured_duration = 0.0;
+#ifdef ENABLE_VISUALIZER
+  unsigned int zmd_adpcm_keyons = 0;
+  // The visualizer's X-key pause state must be applied to the newly loaded
+  // engine after a file switch.
+  bool last_pause_state = false;
+#endif
 
 #ifdef __APPLE__
   AudioContext audioCtx = {0};
@@ -1272,6 +1290,20 @@ reload_file:
   is_spc = is_spc_path(mdx_name);
   is_psf = !is_spc && is_psf_path(mdx_name);
   is_vgm = !is_spc && !is_psf && is_vgm_path(mdx_name);
+  is_zmd = !is_spc && !is_psf && !is_vgm && is_zmd_path(mdx_name);
+#ifdef ENABLE_VISUALIZER
+  zmd_adpcm_keyons = 0;
+  last_pause_state = false;
+#endif
+
+#ifdef __APPLE__
+  if (!is_zmd) {
+    // The audio callback may still be using the previous ZMD player.
+    pthread_mutex_lock(&g_zmd_audio_mutex);
+    g_zmd_audio_player = nullptr;
+    pthread_mutex_unlock(&g_zmd_audio_mutex);
+  }
+#endif
 
 #ifdef ENABLE_VISUALIZER
   if (visualizer) {
@@ -1293,7 +1325,7 @@ reload_file:
     MXDRVG_End();
     mdx_started = false;
   }
-  if (!is_spc && !is_psf && !is_vgm) {
+  if (!is_spc && !is_psf && !is_vgm && !is_zmd) {
     MXDRVG_Start(SAMPLE_RATE, filter_mode, MDX_BUF_SIZE, PDX_BUF_SIZE);
     MXDRVG_TotalVolume(256);
     mdx_started = true;
@@ -1402,6 +1434,66 @@ reload_file:
 #ifdef __APPLE__
     setAudioPCMFillFunc(VgmAudioFill);
 #endif
+  } else if (is_zmd) {
+    if (!zmd_player) zmd_player = new ZmdPlayer();
+    zmd_player->SetSampleRate(SAMPLE_RATE);
+
+    std::string zmd_error;
+    bool zmd_loaded = false;
+#ifdef __APPLE__
+    pthread_mutex_lock(&g_zmd_audio_mutex);
+#endif
+    zmd_measured_duration = 0.0;
+    zmd_loaded = zmd_player->LoadFile(mdx_name, &zmd_error);
+    if (zmd_loaded) {
+      zmd_player->SetLoopCount(loop);
+#ifdef ENABLE_VISUALIZER
+      if (visualizer && ym_state) {
+        if (!zmd_opm_wrapper) {
+          zmd_bridge = new ZmdOpmBridge(zmd_player);
+          zmd_opm_wrapper = new OPMVisualizer(zmd_bridge, ym_state);
+          zmd_opm_wrapper->setVisualizer(visualizer);
+        }
+        // Mirror every YM2151 write into the same state the MDX screen uses.
+        zmd_player->SetRegisterSink(zmd_opm_wrapper);
+      }
+#endif
+      zmd_measured_duration = zmd_player->MeasureSeconds(3600.0);
+      zmd_player->Start();
+#ifdef ENABLE_VISUALIZER
+      zmd_player->SetPaused(visualizer && visualizer->isMXDRVGPaused());
+#else
+      zmd_player->SetPaused(false);
+#endif
+#ifdef __APPLE__
+      g_zmd_audio_player = zmd_player;
+#endif
+    }
+#ifdef __APPLE__
+    pthread_mutex_unlock(&g_zmd_audio_mutex);
+#endif
+    if (!zmd_loaded) {
+      fprintf(stderr, "Cannot load ZMD %s: %s\n", mdx_name, zmd_error.c_str());
+      return -1;
+    }
+    if (zmd_player->HasAdpcm() && !zmd_player->AdpcmReady()) {
+      std::string warning = zmd_player->AdpcmWarning();
+      if (warning.empty()) warning = "no ADPCM sample was registered";
+      fprintf(stderr,
+              "note: this ZMD contains ADPCM commands but no sample could be "
+              "loaded (%s); FM tracks are rendered.\n",
+              warning.c_str());
+    }
+    strncpy(title, zmd_player->Title().c_str(), sizeof(title) - 1);
+    title[sizeof(title) - 1] = 0;
+    if (title[0] == 0) {
+      const char* base = strrchr(mdx_name, '/');
+      strncpy(title, base ? base + 1 : mdx_name, sizeof(title) - 1);
+      title[sizeof(title) - 1] = 0;
+    }
+#ifdef __APPLE__
+    setAudioPCMFillFunc(ZmdAudioFill);
+#endif
   } else {
 #ifdef __APPLE__
     setAudioPCMFillFunc(nullptr);
@@ -1412,6 +1504,9 @@ reload_file:
   }
 
 #ifdef ENABLE_VISUALIZER
+  if (!is_zmd && zmd_player) {
+    zmd_player->SetRegisterSink(nullptr);
+  }
   // ビジュアライザーにタイトルとファイル名を設定
   if (visualizer && ym_state) {
     visualizer->setSongTitle(title);
@@ -1424,7 +1519,19 @@ reload_file:
       visualizer->setCurrentFileIndex(current_file_index);
     }
 
-    if (!is_spc && !is_psf && !is_vgm) {
+    // Keyboard/mute and the B key talk to the chip that is currently playing.
+    if (is_zmd && zmd_player) {
+      visualizer->setOPMWrapper(zmd_opm_wrapper);
+      visualizer->setOPMPointer(zmd_player->OpmPointer());
+    } else {
+      visualizer->setOPMWrapper(opm_wrapper);
+      visualizer->setOPMPointer(
+          (!is_spc && !is_psf && !is_vgm && opm_original)
+              ? opm_original->GetOPMPointer()
+              : nullptr);
+    }
+
+    if (!is_spc && !is_psf && !is_vgm && !is_zmd) {
       // ADPCM全体バッファ情報を取得して設定
       void* adpcm_buffer = MXDRVG_GetADPCMBuffer();
       ym_state->setADPCMBufferInfo(adpcm_buffer, pdx_size);
@@ -1458,6 +1565,8 @@ reload_file:
     song_duration = (float)psf_player->Duration();
   } else if (is_vgm) {
     song_duration = (float)vgm_player->Duration();
+  } else if (is_zmd) {
+    song_duration = (float)zmd_measured_duration;
   } else {
     song_duration = MXDRVG_MeasurePlayTime(loop, fadeout) / 1000.0f;
     // Warning: MXDRVG_MeasurePlayTime calls MXDRVG_End internaly,
@@ -1478,6 +1587,27 @@ reload_file:
     if (max_song_duration < song_duration) {
       song_duration = max_song_duration;
     }
+  }
+
+  // ZMD fades in the main output path (its engine has no built-in fade).
+  double zmd_fade_len = 0.0;
+  double zmd_fade_start = 0.0;
+  if (is_zmd) {
+    double effective = zmd_measured_duration;
+    if (max_song_duration > 0.0f && (double)max_song_duration < effective) {
+      effective = max_song_duration;
+    }
+    if (fadeout && effective > 0.0) {
+      zmd_fade_len = 3.0;
+      zmd_fade_start = std::max(0.0, effective - zmd_fade_len);
+    }
+#ifdef __APPLE__
+    g_zmd_audio_gain = (double)volume * 0.9;
+    g_zmd_fade_start = zmd_fade_start;
+    g_zmd_fade_len = zmd_fade_len;
+    g_zmd_elapsed = 0.0;
+    g_zmd_audio_rate = SAMPLE_RATE;
+#endif
   }
 
   // In direct playback mode the audio callback advances the song clock.  The
@@ -1507,6 +1637,7 @@ reload_file:
 
   // Main loop
   double total_audio_time = 0.0;  // 動画モード用: 累積オーディオ時間
+  long long zmd_rendered = 0;     // ZMD fade position in frames
   int video_frames_rendered = 0;   // 動画モード用: レンダリング済みフレーム数
 
   for (int i = 0; song_duration == 0.0f || 1.0f * i * AUDIO_BUF_SAMPLES / SAMPLE_RATE < song_duration; i++) {
@@ -1619,6 +1750,45 @@ reload_file:
                                        vs[ch].waveform, vs[ch].waveform_samples);
           }
         }
+      } else if (is_zmd) {
+        if (zmd_player) {
+#ifdef __APPLE__
+          pthread_mutex_lock(&g_zmd_audio_mutex);
+#endif
+          void* opm_ptr = zmd_player->OpmPointer();
+          if (opm_ptr) {
+            ym_state->updateFromFmgen(opm_ptr);
+            if (visualizer) {
+              visualizer->setOPMPointer(opm_ptr);
+            }
+          }
+
+          ZmdPlayer::AdpcmVisualState av;
+          if (zmd_player->GetAdpcmVisualState(&av) && av.active &&
+              av.pcm && av.pcm_frames > 0) {
+            const bool initial = av.keyons != zmd_adpcm_keyons;
+            const uintptr_t start = (uintptr_t)av.pcm;
+            int offset = (int)av.position;
+            if (offset < 0) offset = 0;
+            if (offset >= av.pcm_frames) offset = av.pcm_frames - 1;
+            const uintptr_t current = start + (uintptr_t)offset * sizeof(int16_t);
+            ym_state->setADPCMBufferInfo((void*)av.pcm,
+                                         (uint32_t)(av.pcm_frames * 2));
+            ym_state->updateADPCMChannel(0, true, 15, (uint32_t)av.rate,
+                                         initial ? start : current,
+                                         (uint32_t)(av.pcm_frames * 2), 0,
+                                         initial);
+            int16_t waveform[256];
+            const int n = zmd_player->GetAdpcmWaveform(waveform, 256);
+            if (n > 0) ym_state->updateADPCMWaveform(0, waveform, n);
+            zmd_adpcm_keyons = av.keyons;
+          } else {
+            ym_state->updateADPCMChannel(0, false, 0, 0, 0, 0, 0, false);
+          }
+#ifdef __APPLE__
+          pthread_mutex_unlock(&g_zmd_audio_mutex);
+#endif
+        }
       } else if (opm_original) {
         void* opm_ptr = opm_original->GetOPMPointer();
         if (opm_ptr) {
@@ -1635,12 +1805,13 @@ reload_file:
     if (enable_visualizer && visualizer && !video_filename) {
       // 通常モード: 既存の処理
       // MXDRVGの一時停止状態を適用
-      static bool last_pause_state = false;
       static bool spc_paused = false;
       bool current_pause_state = visualizer->isMXDRVGPaused();
       if (current_pause_state != last_pause_state) {
         if (is_spc || is_psf) {
           spc_paused = current_pause_state;
+        } else if (is_zmd) {
+          if (zmd_player) zmd_player->SetPaused(current_pause_state);
         } else if (current_pause_state) {
           MXDRVG_Pause();  // レジスタ書き込みを停止
         } else {
@@ -1750,6 +1921,15 @@ reload_file:
       if (!play_audio && vgm_player && vgm_player->IsFinished()) {
         break;
       }
+    } else if (is_zmd) {
+      if (!play_audio && zmd_player && zmd_player->IsFinished()) {
+#ifdef ENABLE_VISUALIZER
+        if (!enable_visualizer || video_filename)
+#endif
+        {
+          break;
+        }
+      }
     } else {
 #ifdef ENABLE_VISUALIZER
       if (!enable_visualizer || video_filename)
@@ -1821,6 +2001,22 @@ reload_file:
     } else if (is_vgm) {
       if (!vgm_player || vgm_player->IsFinished()) break;
       len = vgm_player->Generate((int16_t*)audio_buf, samples_to_get);
+    } else if (is_zmd) {
+      if (!zmd_player) break;
+      if (zmd_player->IsFinished()) {
+#ifdef ENABLE_VISUALIZER
+        if (enable_visualizer && !video_filename) {
+          // Keep the window alive after the song ends, like MDX.
+          memset(audio_buf, 0, (size_t)samples_to_get * 4);
+          len = samples_to_get;
+        } else
+#endif
+        {
+          break;
+        }
+      } else {
+        len = zmd_player->Generate((int16_t*)audio_buf, samples_to_get);
+      }
     } else {
       len = MXDRVG_GetPCM(audio_buf, samples_to_get);
     }
@@ -1837,8 +2033,27 @@ reload_file:
       }
     }
 
-    // Apply volume adjustment
-    if (volume != 1.0f) {
+    // Apply volume adjustment.  ZMD also leaves a little headroom (eight FM
+    // channels can otherwise hit 0 dBFS on loud songs) and fades its tail.
+    if (is_zmd) {
+      const double zmd_time = (double)zmd_rendered / SAMPLE_RATE;
+      double fade = 1.0;
+      if (zmd_fade_len > 0.0 && zmd_time >= zmd_fade_start) {
+        fade = 1.0 - (zmd_time - zmd_fade_start) / zmd_fade_len;
+        if (fade < 0.0) fade = 0.0;
+      }
+      const double output_volume = (double)volume * fade * 0.9;
+      zmd_rendered += len;
+      if (output_volume != 1.0) {
+        for (int i = 0; i < len * 2; i++) {
+          int sample = (int)lrint(audio_buf[i] * output_volume);
+          // Clamp to prevent overflow
+          if (sample > 32767) sample = 32767;
+          else if (sample < -32768) sample = -32768;
+          audio_buf[i] = (short)sample;
+        }
+      }
+    } else if (volume != 1.0f) {
       for (int i = 0; i < len * 2; i++) {
         int sample = (int)(audio_buf[i] * volume);
         // Clamp to prevent overflow
@@ -1886,6 +2101,9 @@ reload_file:
   pthread_mutex_lock(&g_spc_audio_mutex);
   g_spc_audio_player = nullptr;
   pthread_mutex_unlock(&g_spc_audio_mutex);
+  pthread_mutex_lock(&g_zmd_audio_mutex);
+  g_zmd_audio_player = nullptr;
+  pthread_mutex_unlock(&g_zmd_audio_mutex);
 #endif
 
   delete []audio_buf;
@@ -1905,11 +2123,20 @@ reload_file:
     if (opm_wrapper) {
       delete opm_wrapper;
     }
+    if (zmd_opm_wrapper) {
+      delete zmd_opm_wrapper;
+    }
+    if (zmd_bridge) {
+      delete zmd_bridge;
+    }
     if (ym_state) {
       delete ym_state;
     }
   }
 #endif
+
+  delete zmd_player;
+  zmd_player = nullptr;
 
   if (verbose) {
     fprintf(stderr, "completed.\n");

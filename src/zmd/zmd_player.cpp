@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "../../gamdx/fmgen/opm.h"
+#include "../../gamdx/mxdrvg/opm_delegate.h"
 #include "msm6258.h"
 
 namespace {
@@ -54,9 +55,12 @@ ZmdPlayer::ZmdPlayer()
       all_dead_(false),
       tail_started_(false),
       tail_remaining_(0),
+      paused_(false),
       tick_accum_(0.0),
       samples_per_tick_(0.0),
       total_seconds_(0.0),
+      adpcm_keyons_(0),
+      register_sink_(nullptr),
       opm_(nullptr) {}
 
 ZmdPlayer::~ZmdPlayer() {
@@ -70,6 +74,79 @@ void ZmdPlayer::SetSampleRate(int sample_rate) {
 }
 
 void ZmdPlayer::SetLoopCount(int loops) { loop_limit_ = loops; }
+
+void ZmdPlayer::WriteOpmDirect(uint8_t addr, uint8_t data) {
+  if (opm_) opm_->SetReg(addr, data);
+}
+
+void ZmdPlayer::WriteReg(uint8_t addr, uint8_t data) {
+  if (!opm_) return;
+  if (register_sink_) {
+    register_sink_->SetReg(addr, data);
+  } else {
+    opm_->SetReg(addr, data);
+  }
+}
+
+int ZmdPlayer::UsedFmChannels() const {
+  int used = 0;
+  for (size_t i = 0; i < tracks_.size(); i++) {
+    const int ch = tracks_[i].channel;
+    if (ch >= 0 && ch < 8 && ch + 1 > used) used = ch + 1;
+  }
+  return used;
+}
+
+bool ZmdPlayer::GetAdpcmVisualState(AdpcmVisualState* out) const {
+  if (!out) return false;
+  *out = AdpcmVisualState();
+  const int note = adpcm_play_.note;
+  if (note < 0 || note >= (int)adpcm_.size() || !adpcm_[note].valid) {
+    return false;
+  }
+  const AdpcmSample& sample = adpcm_[note];
+  static const double kRates[5] = {3900.0, 5200.0, 7800.0, 10400.0, 15600.0};
+  const int freq = Clamp(adpcm_freq_, 0, 4);
+  out->sample_valid = true;
+  out->active = adpcm_play_.active;
+  out->note = note;
+  out->rate = (int)llround(kRates[freq] * pow(2.0, (sample.pitch - 12) / 12.0));
+  out->volume = sample.volume;
+  out->pan = adpcm_pan_;
+  out->pcm = sample.pcm.empty() ? nullptr : sample.pcm.data();
+  out->pcm_frames = (int)sample.pcm.size();
+  out->position = adpcm_play_.pos;
+  out->step = adpcm_play_.step;
+  out->keyons = adpcm_keyons_;
+  return true;
+}
+
+int ZmdPlayer::GetAdpcmWaveform(int16_t* out, int max_samples) const {
+  if (!out || max_samples <= 0) return 0;
+  const int note = adpcm_play_.note;
+  if (!adpcm_play_.active || note < 0 || note >= (int)adpcm_.size() ||
+      !adpcm_[note].valid) {
+    return 0;
+  }
+  const std::vector<int16_t>& pcm = adpcm_[note].pcm;
+  if (pcm.size() < 2) return 0;
+  double step = adpcm_play_.step;
+  if (!(step > 0.0)) step = 1.0;
+  double pos = adpcm_play_.pos - (double)max_samples * step;
+  if (pos < 0.0) pos = 0.0;
+  for (int i = 0; i < max_samples; i++) {
+    if (pos >= (double)(pcm.size() - 1)) {
+      out[i] = 0;
+      continue;
+    }
+    const size_t idx = (size_t)pos;
+    const double frac = pos - (double)idx;
+    out[i] = (int16_t)llround((double)pcm[idx] * (1.0 - frac) +
+                              (double)pcm[idx + 1] * frac);
+    pos += step;
+  }
+  return max_samples;
+}
 
 uint16_t ZmdPlayer::Be16(size_t pos) const {
   return (uint16_t)((data_[pos] << 8) | data_[pos + 1]);
@@ -450,6 +527,7 @@ void ZmdPlayer::StartAdpcm(int note) {
   adpcm_play_.active = true;
   adpcm_play_.note = note;
   adpcm_play_.pos = 0.0;
+  adpcm_keyons_++;
   // The ZPD sample is stored at 15.6 kHz; resample it to the output rate.
   adpcm_play_.step = (kRates[freq] / (double)sample_rate_) * pitch_factor;
 }
@@ -537,7 +615,7 @@ void ZmdPlayer::Start() {
   if (!opm_) opm_ = new FM::OPM();
   opm_->Init(4000000, (uint32_t)sample_rate_, false);
   opm_->Reset();
-  opm_->SetReg(0x14, 0x00);  // timers off
+  WriteReg(0x14, 0x00);  // timers off
 
   ResetTracks();
   tick_accum_ = 0.0;
@@ -546,9 +624,11 @@ void ZmdPlayer::Start() {
   all_dead_ = false;
   tail_started_ = false;
   tail_remaining_ = 0;
+  paused_ = false;
   started_ = true;
 
   adpcm_play_ = AdpcmPlay();
+  adpcm_keyons_ = 0;
   adpcm_freq_ = 4;
   adpcm_pan_ = 3;
   adpcm_track_volume_ = 0x15;  // Z-MUSIC default p_vol
@@ -582,29 +662,29 @@ void ZmdPlayer::WriteVoice(Track& t, int pgm, bool preserve_pan) {
   }
 
   const int ch = t.channel;
-  opm_->SetReg(0x20 + ch, (uint8_t)(((t.pan & 3) << 6) | t.af));
-  opm_->SetReg(0x38 + ch, (uint8_t)(((v[7] & 0x0f) << 4) | (v[8] & 0x0f)));
-  opm_->SetReg(0x18, v[4]);
-  opm_->SetReg(0x19, (uint8_t)(v[5] | 0x80));
-  opm_->SetReg(0x1a, (uint8_t)(v[6] & 0x7f));
-  opm_->SetReg(0x1b, (uint8_t)(v[2] & 0x03));
+  WriteReg(0x20 + ch, (uint8_t)(((t.pan & 3) << 6) | t.af));
+  WriteReg(0x38 + ch, (uint8_t)(((v[7] & 0x0f) << 4) | (v[8] & 0x0f)));
+  WriteReg(0x18, v[4]);
+  WriteReg(0x19, (uint8_t)(v[5] | 0x80));
+  WriteReg(0x1a, (uint8_t)(v[6] & 0x7f));
+  WriteReg(0x1b, (uint8_t)(v[2] & 0x03));
 
   for (int op = 0; op < 4; op++) {
     const int base = kOpData[op];
     const int reg = 0x40 + kOpOffset[op] + ch;
-    opm_->SetReg(reg, (uint8_t)(((v[base + 8] & 0x07) << 4) | (v[base + 7] & 0x0f)));
-    opm_->SetReg(reg + 0x20, (uint8_t)(v[base + 5] & 0x7f));  // TL
-    opm_->SetReg(reg + 0x40, (uint8_t)(((v[base + 6] & 0x03) << 6) | (v[base + 0] & 0x1f)));
-    opm_->SetReg(reg + 0x60, (uint8_t)(((v[base + 10] & 0x01) << 7) | (v[base + 1] & 0x1f)));
-    opm_->SetReg(reg + 0x80, (uint8_t)(((v[base + 9] & 0x03) << 6) | (v[base + 2] & 0x1f)));
-    opm_->SetReg(reg + 0xa0, (uint8_t)(((v[base + 4] & 0x0f) << 4) | (v[base + 3] & 0x0f)));
+    WriteReg(reg, (uint8_t)(((v[base + 8] & 0x07) << 4) | (v[base + 7] & 0x0f)));
+    WriteReg(reg + 0x20, (uint8_t)(v[base + 5] & 0x7f));  // TL
+    WriteReg(reg + 0x40, (uint8_t)(((v[base + 6] & 0x03) << 6) | (v[base + 0] & 0x1f)));
+    WriteReg(reg + 0x60, (uint8_t)(((v[base + 10] & 0x01) << 7) | (v[base + 1] & 0x1f)));
+    WriteReg(reg + 0x80, (uint8_t)(((v[base + 9] & 0x03) << 6) | (v[base + 2] & 0x1f)));
+    WriteReg(reg + 0xa0, (uint8_t)(((v[base + 4] & 0x0f) << 4) | (v[base + 3] & 0x0f)));
   }
   ApplyVolume(t);
 }
 
 void ZmdPlayer::ApplyPan(Track& t) {
   if (!opm_ || t.channel >= 8) return;
-  opm_->SetReg(0x20 + t.channel, (uint8_t)(((t.pan & 3) << 6) | t.af));
+  WriteReg(0x20 + t.channel, (uint8_t)(((t.pan & 3) << 6) | t.af));
 }
 
 void ZmdPlayer::ApplyVolume(Track& t) {
@@ -617,7 +697,7 @@ void ZmdPlayer::ApplyVolume(Track& t) {
       tl -= am;
     }
     tl = Clamp(tl, 0, 127);
-    opm_->SetReg(0x60 + kOpOffset[op] + t.channel, (uint8_t)tl);
+    WriteReg(0x60 + kOpOffset[op] + t.channel, (uint8_t)tl);
   }
 }
 
@@ -631,9 +711,9 @@ void ZmdPlayer::SetPitch(Track& t, int note, int kf_offset) {
     d1 &= 0x3f;
   }
   const int kf = (d1 & 0xff) << 2;
-  opm_->SetReg(0x30 + t.channel, (uint8_t)(kf & 0xff));
+  WriteReg(0x30 + t.channel, (uint8_t)(kf & 0xff));
   const int idx = Clamp(n, 0, 127);
-  opm_->SetReg(0x28 + t.channel, kKcTable[idx]);
+  WriteReg(0x28 + t.channel, kKcTable[idx]);
 }
 
 void ZmdPlayer::KeyOn(Track& t, int note) {
@@ -647,10 +727,10 @@ void ZmdPlayer::KeyOn(Track& t, int note) {
   t.note = note;
   t.key_on = true;
   SetPitch(t, note, 0);
-  opm_->SetReg(0x08, (uint8_t)(t.channel | t.om));
+  WriteReg(0x08, (uint8_t)(t.channel | t.om));
   if (t.has_voice && t.vdata[3] != 0) {
-    opm_->SetReg(0x01, 0x02);
-    opm_->SetReg(0x01, 0x00);
+    WriteReg(0x01, 0x02);
+    WriteReg(0x01, 0x00);
   }
 }
 
@@ -662,7 +742,7 @@ void ZmdPlayer::KeyOff(Track& t) {
   }
   if (!opm_) return;
   if (t.key_on) {
-    opm_->SetReg(0x08, (uint8_t)t.channel);
+    WriteReg(0x08, (uint8_t)t.channel);
     t.key_on = false;
   }
 }
@@ -1017,7 +1097,7 @@ void ZmdPlayer::RunCommands(Track& t) {
       }
       case 0xb5: {
         if (t.pc + 3 > n) { EndTrack(t); return; }
-        opm_->SetReg(d[t.pc + 1], d[t.pc + 2]);
+        WriteReg(d[t.pc + 1], d[t.pc + 2]);
         t.pc += 3;
         break;
       }
@@ -1334,6 +1414,15 @@ void ZmdPlayer::RunCommands(Track& t) {
 int ZmdPlayer::Generate(int16_t* out, int frames) {
   if (!started_ || frames <= 0) return 0;
   if (all_dead_ && tail_remaining_ <= 0) return 0;
+
+  if (paused_) {
+    // Hold the sequencer but keep the OPM and the ADPCM voice running, like
+    // MXDRVG_Pause does for MDX.
+    memset(out, 0, (size_t)frames * 4);
+    opm_->Mix((FM::Sample*)out, frames);
+    MixAdpcm(out, frames);
+    return frames;
+  }
 
   int produced = 0;
   while (produced < frames) {

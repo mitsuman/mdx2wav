@@ -22,6 +22,8 @@ namespace FM {
 class OPM;
 }
 
+class OPM_Delegate;
+
 class ZmdPlayer {
  public:
   ZmdPlayer();
@@ -44,6 +46,42 @@ class ZmdPlayer {
   const std::string& AdpcmWarning() const { return adpcm_warning_; }
   const std::string& Title() const { return title_; }
   const std::string& LastError() const { return error_; }
+
+  // Highest FM channel used by the track table (1..8, 0 when there is none).
+  // The visualizer uses this to size its window like it does for MDX.
+  int UsedFmChannels() const;
+
+  // The YM2151 register stream can be mirrored into the visualizer before it
+  // reaches the chip.  When no sink is set, registers go straight to the OPM.
+  void SetRegisterSink(OPM_Delegate* sink) { register_sink_ = sink; }
+  void WriteOpmDirect(uint8_t addr, uint8_t data);
+  void* OpmPointer() const { return opm_; }
+
+  // Pauses the sequencer while the OPM keeps mixing (the visualizer's X key).
+  void SetPaused(bool paused) { paused_ = paused; }
+
+  // Snapshot of the MSM6258 voice for the ADPCM row of the visualizer.
+  struct AdpcmVisualState {
+    bool active;
+    bool sample_valid;
+    int note;
+    int rate;          // source rate in Hz after pitch/volume settings
+    int volume;        // registration volume (100 = original)
+    int pan;           // 0 mute, 1 left, 2 right, 3 centre
+    const int16_t* pcm;
+    int pcm_frames;
+    double position;   // current position in source frames
+    double step;       // source frames per output frame
+    unsigned int keyons;
+    AdpcmVisualState()
+        : active(false), sample_valid(false), note(-1), rate(0), volume(100),
+          pan(3), pcm(nullptr), pcm_frames(0), position(0.0), step(1.0),
+          keyons(0) {}
+  };
+  bool GetAdpcmVisualState(AdpcmVisualState* out) const;
+  // Fills up to max_samples output-rate samples ending at the current
+  // playback position.  Returns the number of samples written.
+  int GetAdpcmWaveform(int16_t* out, int max_samples) const;
 
   // Runs the sequencer without mixing audio and returns the length in
   // seconds.  The player is re-armed by this call; call Start() afterwards.
@@ -166,6 +204,7 @@ class ZmdPlayer {
   bool AllDead() const;
   uint16_t Be16(size_t pos) const;
   uint32_t Be32(size_t pos) const;
+  void WriteReg(uint8_t addr, uint8_t data);
 
   std::vector<uint8_t> data_;
   std::vector<Voice> voices_;
@@ -192,11 +231,15 @@ class ZmdPlayer {
   bool all_dead_;
   bool tail_started_;
   int tail_remaining_;
+  bool paused_;
 
   double tick_accum_;
   double samples_per_tick_;
   double total_seconds_;
 
+  unsigned int adpcm_keyons_;
+
+  OPM_Delegate* register_sink_;
   FM::OPM* opm_;
 };
 

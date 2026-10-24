@@ -15,9 +15,9 @@ license section of the zmusic2 README.
 
 | File | Purpose |
 |---|---|
-| `zmd_player.h` | `ZmdPlayer` interface, per-track state |
+| `zmd_player.h` | `ZmdPlayer` interface, per-track state, visualizer hooks |
 | `zmd_player.cpp` | ZMD parser, sequencer, YM2151 register layer |
-| `../mdx2wav.cpp` | `.zmd` detection, CLI path (`run_zmd_file`) |
+| `../mdx2wav.cpp` | `.zmd` detection, main loop, visualizer bridge |
 
 ## Signal path
 
@@ -38,6 +38,21 @@ license section of the zmusic2 README.
    DT2/D2R, D1L/RR for each operator.  Carrier operators get
    `voice TL + volume`; modulators keep their voice TL.
 6. Audio comes from the existing fmgen YM2151 core at 4 MHz.
+
+## Visualizer
+
+The SDL2 visualizer uses the same MDX screen for ZMD.  Every register write
+goes through an optional `OPM_Delegate` sink, so the existing `OPMVisualizer`
+feeds the YM2151 state used by the MDX layout (algorithm, pan, LFO, key-on,
+operator envelopes).  `ZmdPlayer::OpmPointer()` lets the visualizer read the
+per-channel waveforms and EG state from the same fmgen chip that is mixing the
+audio.  Keyboard playing, mute and the B-key timer toggle work through the
+same wrapper.
+
+The single MSM6258 voice is exposed as `AdpcmVisualState` and rendered in the
+usual OKI/MSM6258 row: note, rate, progress through the sample, and a live
+waveform.  `UsedFmChannels()` and `HasAdpcm()` size the window the way the MDX
+register scan does, so an all-FM song has no empty OKI rows.
 
 ## Commands implemented
 
@@ -71,7 +86,8 @@ They contain no ADPCM commands.
   are ignored.
 * Tie/dumper handling assumes one voice per FM track, which is how the target
   files are written (no `E2` chords).
-* `-p` and the SDL2 visualizer are not connected to the ZMD engine.
+* The Timer A/B status shown by the visualizer stays at the ZMD player's
+  software timing (`$14 = 0`); it is not written with the tempo period.
 
 ## Verification
 
@@ -83,3 +99,6 @@ They contain no ADPCM commands.
 * All 14 tracks render without errors; measured `-l 2 -f` lengths are
   13.3 s to 214.1 s.  A 0.9 output gain keeps the loudest song
   (`Mu2_dofight`) below full scale.
+* `-g`, `-g --video`, `-g -p` and `--screenshot` render the 8-channel MDX
+  layout, and a synthetic ZMD with a `$40` ZPD reference shows the OKI/
+  MSM6258 row with a progressing waveform.

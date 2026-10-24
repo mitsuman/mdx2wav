@@ -44,6 +44,8 @@ Ver.2.08 tree).  Usage is the same as MDX:
 ```shell
 mdx2wav song.zmd | ffmpeg -f s16le -ar 44.1k -ac 2 -i - song.wav
 mdx2wav -l 1 song.zmd | ffmpeg -f s16le -ar 44.1k -ac 2 -i - song.wav
+mdx2wav -g song.zmd        # SDL2 visualizer (same screen as MDX)
+mdx2wav -g -p song.zmd     # visualizer plus direct audio (macOS)
 mdx2wav -m song.zmd        # measured length in seconds
 mdx2wav -t song.zmd        # ZMD comment (Shift-JIS)
 ```
@@ -55,11 +57,17 @@ software pitch/amplitude LFO.  YM2151 output uses the existing fmgen core.
 The built-in MSM6258 ADPCM channel is also playable from ZPD samples
 (`$40`/`$9B`/`$A2`/`$A9`/`$B7`/`$B8`), resampled at 3.9–15.6 kHz.
 
+`-g`, `--video`, `--screenshot` and the file list/history views use the same
+MDX visualizer layout: the eight FM channels show algorithm, pan, LFO, keys and
+captured waveforms, and the one built-in MSM6258 voice gets the usual OKI/
+ADPCM row.  The window is auto-sized from the ZMD track table like MDX auto-
+sizes from the registers the song writes.  `-p` direct playback works too,
+including `-g -p`.
+
 Not implemented yet: ZPD registration-time mixing and fade processing, P16/
-PCM8 sample formats, `-p` direct playback and the SDL2 visualizer, and the
-rare `D.C.`/`D.S.`/`CODA` flow commands.  The Metal Unit II tracks use FM
-only, so they render completely; `-l`, `-d`, `-f`, `-m`, `-t`, `--volume` and
-`--swap-channels` work.
+PCM8 sample formats, and the rare `D.C.`/`D.S.`/`CODA` flow commands.  The
+Metal Unit II tracks use FM only, so they render completely; `-l`, `-d`, `-f`,
+`-m`, `-t`, `--volume` and `--swap-channels` work.
 
 ### Options
 
@@ -115,14 +123,16 @@ cursor keys and played with Enter.  The list is stored in
 `~/.config/mdx2wav/history.txt` and survives restarts; re-playing a file moves
 it back to the top instead of adding a duplicate.
 
-## Automatic MDX window size
+## Automatic window size
 
 Before the window is created, an MDX song is played once without drawing
 (typically well under a second per minute of music) to see which FM and ADPCM
-channels it really uses.  The window — and the recorded video — is then sized
-to those channels, so a song with one ADPCM channel is not shown with eight
-empty OKI rows.  `--no-auto-size` keeps the previous fixed sizing, and
-`--ym2151-ch` / `--adpcm-ch` still cap the counts.
+channels it really uses.  ZMD songs read the same information from the track
+table instead, and Z-MUSIC has a single built-in MSM6258 voice.  The window —
+and the recorded video — is then sized to those channels, so a song with one
+ADPCM channel is not shown with eight empty OKI rows.  `--no-auto-size` keeps
+the previous fixed sizing, and `--ym2151-ch` / `--adpcm-ch` still cap the
+counts.
 
 ## Spectrum analyzer
 
