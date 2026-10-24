@@ -1148,6 +1148,17 @@ int main(int argc, char **argv) {
 #endif
 
 reload_file:
+  // A new song always starts playing, even if the previous one was paused.
+  if (g_song_paused) {
+    g_song_paused = false;
+#ifdef ENABLE_VISUALIZER
+    if (visualizer) visualizer->setSongPaused(false);
+#endif
+#ifdef __APPLE__
+    setAudioPaused(false);
+#endif
+  }
+
   // A directory may contain several formats; decide again for every file.
   is_spc = is_spc_path(mdx_name);
   is_psf = !is_spc && is_psf_path(mdx_name);
