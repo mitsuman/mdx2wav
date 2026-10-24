@@ -380,7 +380,8 @@ void VgmFilePlayer::GetDacState(DacState* out) const {
     last_dac_pos_ = pos;
     dac_stall_ = 0;
   }
-  if (dac_stall_ > 8) return;
+  // 30 ms without a new DAC sample (about two 60 fps frames) means silence.
+  if (dac_stall_ >= 2) return;
 
   const int count = kWaveformSamples;
   // A DAC that only idles around the centre (127/128) is silence: don't let
