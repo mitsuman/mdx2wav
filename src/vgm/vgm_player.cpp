@@ -98,6 +98,7 @@ void VGMPlayer::Start(int loop, double max_duration, double fade_seconds) {
   finished_ = false;
   chip_phase_ = 0.0;
   last_l_ = last_r_ = 0;
+  dc_l_ = dc_r_ = 0.0;
   OPN2_Reset(&opn2_);
   psg_.Reset(3579545);
   for (int i = 0; i < kFmChannels; i++) {
@@ -233,10 +234,17 @@ bool VGMPlayer::RunCommand() {
 
 void VGMPlayer::ClockChips() {
   if (has_opn2_) {
+    // The chip multiplexes its six channels over 24 master cycles, so one
+    // output sample is the sum of all 24 clocks (not just the last one).
+    int acc_l = 0, acc_r = 0;
     int16_t buf[2] = {0, 0};
-    for (int k = 0; k < 24; k++) OPN2_Clock(&opn2_, buf);
-    last_l_ = buf[0];
-    last_r_ = buf[1];
+    for (int k = 0; k < 24; k++) {
+      OPN2_Clock(&opn2_, buf);
+      acc_l += buf[0];
+      acc_r += buf[1];
+    }
+    last_l_ = (int16_t)std::max(-32768, std::min(32767, acc_l));
+    last_r_ = (int16_t)std::max(-32768, std::min(32767, acc_r));
     for (int ch = 0; ch < kFmChannels; ch++) {
       int16_t v = opn2_.ch_out[ch];
       wave_ring_[ch][wave_pos_[ch]++ & (kWaveformSamples - 1)] = v;
@@ -268,8 +276,13 @@ int VGMPlayer::Generate(int16_t* out, int frames) {
     if (has_psg_) psg_.Generate(&psg_l, &psg_r);
 
     // Nuked's YM2612 output is a small 9-bit value; scale it into range.
-    int l = last_l_ * 16 + psg_l;
-    int r = last_r_ * 16 + psg_r;
+    int l = last_l_ * 8 + psg_l;
+    int r = last_r_ * 8 + psg_r;
+    // The YM2612's DAC emulation leaves a DC bias; remove it.
+    dc_l_ += ((double)l - dc_l_) * 0.0005;
+    dc_r_ += ((double)r - dc_r_) * 0.0005;
+    l -= (int)dc_l_;
+    r -= (int)dc_r_;
     if (l > 32767) l = 32767;
     if (l < -32768) l = -32768;
     if (r > 32767) r = 32767;
