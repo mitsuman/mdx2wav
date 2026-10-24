@@ -13,9 +13,21 @@ void setAudioPCMFillFunc(AudioPCMFillFunc func) {
   g_audio_fill = func;
 }
 
+static volatile bool g_audio_paused = false;
+
+void setAudioPaused(bool paused) { g_audio_paused = paused; }
+
 static void audioCallback(void *userData, AudioQueueRef queue, AudioQueueBufferRef buffer) {
   AudioContext *ctx = (AudioContext *)userData;
   
+  if (g_audio_paused) {
+    // Paused: keep the queue alive with silence and do not advance the song.
+    memset(buffer->mAudioData, 0, (size_t)ctx->buffer_samples * 4);
+    buffer->mAudioDataByteSize = (unsigned int)(ctx->buffer_samples * 4);
+    AudioQueueEnqueueBuffer(queue, buffer, 0, NULL);
+    return;
+  }
+
   // continuous playbackモードでは曲終了を無視
   if (!ctx->playing) {
     ctx->terminated = true;

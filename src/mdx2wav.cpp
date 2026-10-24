@@ -38,6 +38,11 @@ bool verbose = false;
 bool g_continuous_playback = false;
 
 #ifdef __APPLE__
+extern void setAudioPaused(bool paused);
+#endif
+static volatile bool g_song_paused = false;
+
+#ifdef __APPLE__
 // The AudioQueue callback runs on its own thread.  SPC state is shared with
 // the visualizer, so both generation and state snapshots take this lock.
 static SPCPlayer* g_spc_audio_player = nullptr;
@@ -50,6 +55,10 @@ static VgmFilePlayer* g_vgm_audio_player = nullptr;
 static pthread_mutex_t g_vgm_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static int VgmAudioFill(short* out, int frames) {
+  if (g_song_paused) {
+    memset(out, 0, (size_t)frames * 4);
+    return frames;
+  }
   pthread_mutex_lock(&g_vgm_audio_mutex);
   int len = 0;
   if (g_vgm_audio_player && !g_vgm_audio_player->IsFinished()) {
@@ -60,6 +69,10 @@ static int VgmAudioFill(short* out, int frames) {
 }
 
 static int PsfAudioFill(short* out, int frames) {
+  if (g_song_paused) {
+    memset(out, 0, (size_t)frames * 4);
+    return frames;
+  }
   pthread_mutex_lock(&g_psf_audio_mutex);
   int len = 0;
   if (g_psf_audio_player && !g_psf_audio_player->IsFinished()) {
@@ -70,6 +83,10 @@ static int PsfAudioFill(short* out, int frames) {
 }
 
 static int SpcAudioFill(short* out, int frames) {
+  if (g_song_paused) {
+    memset(out, 0, (size_t)frames * 4);
+    return frames;
+  }
   pthread_mutex_lock(&g_spc_audio_mutex);
   int len = 0;
   if (g_spc_audio_player && !g_spc_audio_player->IsFinished()) {
@@ -1513,6 +1530,16 @@ reload_file:
       }
       visualizer->update();
 
+      // Space pauses/resumes the song (audio and visuals).
+      if (visualizer->takePauseToggle()) {
+        g_song_paused = !g_song_paused;
+        visualizer->setSongPaused(g_song_paused);
+#ifdef __APPLE__
+        setAudioPaused(g_song_paused);
+#endif
+        fprintf(stderr, "Song %s\n", g_song_paused ? "PAUSED" : "RESUMED");
+      }
+
         // 曲の再スタート要求をチェック
         if (visualizer->hasRestartRequest()) {
           visualizer->clearRestartRequest();
@@ -1658,6 +1685,11 @@ reload_file:
       }
     }
 #endif
+
+    if (g_song_paused) {
+      usleep(16 * 1000);
+      continue;
+    }
 
     int len;
     if (is_spc) {

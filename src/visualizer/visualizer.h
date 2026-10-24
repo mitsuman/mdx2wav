@@ -211,6 +211,14 @@ public:
     
     // MXDRVG一時停止状態を取得
     bool isMXDRVGPaused() const { return mxdrvg_paused_; }
+    // Space toggles the song pause; main polls this once per frame.
+    bool takePauseToggle() {
+        const bool r = pause_toggle_requested_;
+        pause_toggle_requested_ = false;
+        return r;
+    }
+    void setSongPaused(bool paused) { song_paused_ = paused; }
+    bool isSongPaused() const { return song_paused_; }
     
     // YM2151ミュート状態を取得
     bool isYM2151Muted() const { return ym2151_muted_; }
@@ -362,6 +370,8 @@ private:
     
     // MXDRVG一時停止フラグ
     bool mxdrvg_paused_;
+    bool pause_toggle_requested_;
+    bool song_paused_;
     
     // YM2151レジスタ書き込みブロックフラグ
     bool ym2151_muted_;

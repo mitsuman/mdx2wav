@@ -78,6 +78,9 @@ LSB on a handful of samples for SPC, over the first seconds of playback.
 
 ## Playback history
 
+Space pauses and resumes the song (audio and visuals); inside the history view
+`F` switches to the file list.
+
 Pressing `H` in the visualizer opens a history view with the same list UI as
 the filer: the 1024 most recently played files, newest first, chosen with the
 cursor keys and played with Enter.  The list is stored in

@@ -128,6 +128,8 @@ Visualizer::Visualizer()
     , requested_file_index_(0)
     , restart_requested_(false)
     , mxdrvg_paused_(false)
+    , pause_toggle_requested_(false)
+    , song_paused_(false)
     , ym2151_muted_(false)
     , selected_channel_(0)
     , octave_offset_(-1)
@@ -598,6 +600,15 @@ void Visualizer::update() {
                     path_change_requested_ = true;
                     history_mode_ = false;
                     return;
+                } else if (sym == SDLK_f) {
+                    // Switch from the history view to the file list.
+                    history_mode_ = false;
+                    if (file_list_count_ > 0) {
+                        filer_mode_ = true;
+                        filer_selection_ = current_file_index_;
+                        filer_scroll_ = 0;
+                        ensureFilerSelectionVisible();
+                    }
                 } else if (sym == SDLK_ESCAPE || sym == SDLK_h) {
                     history_mode_ = false;
                 }
@@ -725,6 +736,8 @@ void Visualizer::update() {
                 requested_file_index_ = new_index;
                 file_change_requested_ = true;
                 return;
+            } else if (event.key.keysym.sym == SDLK_SPACE) {
+                pause_toggle_requested_ = true;
             } else if (event.key.keysym.sym == SDLK_x) {
                 // MXDRVGの一時停止/再開（レジスタ書き込みのみ停止、PCM生成は継続）
                 mxdrvg_paused_ = !mxdrvg_paused_;
@@ -873,7 +886,7 @@ void Visualizer::update() {
     SDL_RenderClear(renderer_);
     
     // 再生時間を更新（60FPS想定）
-    elapsed_time_ += 1.0 / 60.0;
+    if (!song_paused_) elapsed_time_ += 1.0 / 60.0;
     
     // 各パーツを描画
     renderTitle();
