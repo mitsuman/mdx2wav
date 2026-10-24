@@ -245,10 +245,6 @@ void VGMPlayer::ClockChips() {
     }
     last_l_ = (int16_t)std::max(-32768, std::min(32767, acc_l));
     last_r_ = (int16_t)std::max(-32768, std::min(32767, acc_r));
-    for (int ch = 0; ch < kFmChannels; ch++) {
-      int16_t v = opn2_.ch_out[ch];
-      wave_ring_[ch][wave_pos_[ch]++ & (kWaveformSamples - 1)] = v;
-    }
   }
 }
 
@@ -270,6 +266,19 @@ int VGMPlayer::Generate(int16_t* out, int frames) {
     while (chip_phase_ >= 1.0) {
       ClockChips();
       chip_phase_ -= 1.0;
+    }
+
+    // Capture each channel's own output once per output sample (ch_out is the
+    // channel accumulator, i.e. the value that channel contributes).
+    if (has_opn2_) {
+      for (int ch = 0; ch < kFmChannels; ch++) {
+        // ch_out is a small accumulator value (about +-256); scale it so the
+        // panel's auto scale has something to work with.
+        int v = opn2_.ch_out[ch] * 64;
+        if (v > 32767) v = 32767;
+        if (v < -32768) v = -32768;
+        wave_ring_[ch][wave_pos_[ch]++ & (kWaveformSamples - 1)] = (int16_t)v;
+      }
     }
 
     int16_t psg_l = 0, psg_r = 0;
