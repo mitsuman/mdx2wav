@@ -230,7 +230,11 @@ static const Bit32u fm_algorithm[4][6][8] = {
     }
 };
 
-//static Bit32u chip_type = ym3438_mode_readmode;	// moved into ym3438_t struct
+///* mdx2wav visualizer support */
+#define VIS_CHANNELS 6
+static Bit32u g_vis_kon[VIS_CHANNELS];   /* key-on counter per channel */
+
+static Bit32u chip_type = ym3438_mode_readmode;	// moved into ym3438_t struct
 
 static void NOPN2_DoIO(ym3438_t *chip)
 {
@@ -429,6 +433,13 @@ static void NOPN2_DoRegWrite(ym3438_t *chip)
                 else
                 {
                     chip->mode_kon_channel = (chip->write_data & 0x03) + ((chip->write_data >> 2) & 1) * 3;
+                    /* mdx2wav: count key-ons so the visualizer can latch the
+                       keyboard note at the note-on event. */
+                    if ((chip->write_data & 0xF0) != 0x00 &&
+                        chip->mode_kon_channel < VIS_CHANNELS)
+                    {
+                        g_vis_kon[chip->mode_kon_channel] ++;
+                    }
                 }
                 break;
             case 0x2a: /* DAC data */
@@ -1566,7 +1577,6 @@ void NOPN2_GenerateResampled(ym3438_t *chip, Bit32s *buf)
 }
 
 /* mdx2wav visualizer support: per-channel output captured at the output rate. */
-#define VIS_CHANNELS 6
 #define VIS_SAMPLES 1024
 static Bit16s g_vis_wave[VIS_CHANNELS][VIS_SAMPLES];
 static Bit32u g_vis_pos[VIS_CHANNELS];
@@ -1574,6 +1584,11 @@ static Bit16s g_vis_dac[VIS_SAMPLES];
 static Bit32u g_vis_dac_pos;
 static int g_vis_dac_en;
 static Bit16s g_vis_dac_last;
+
+UINT32 nukedopn2_vis_kon(int ch)
+{
+    return g_vis_kon[ch & 7];
+}
 
 const INT16* nukedopn2_vis_dac(void)
 {

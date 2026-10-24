@@ -389,7 +389,7 @@ void YM2151State::setSPCMode(bool enabled) {
     pthread_mutex_unlock(&mutex_);
 }
 
-void YM2151State::updateVGMChannel(int ch, bool key_on, int note, int algorithm,
+void YM2151State::updateVGMChannel(int ch, bool key_on, bool note_on, int note, int algorithm,
                                    int feedback, bool pan_left, bool pan_right,
                                    const int eg_out[4], const int eg_phase[4],
                                    const int16_t* waveform, int waveform_samples) {
@@ -397,6 +397,7 @@ void YM2151State::updateVGMChannel(int ch, bool key_on, int note, int algorithm,
     pthread_mutex_lock(&mutex_);
     Channel& c = channels_[ch];
     c.key_on = key_on;
+    c.spc_note_on = note_on;
     c.note = (uint8_t)std::max(0, std::min(127, note));
     c.algorithm = (uint8_t)(algorithm & 7);
     c.feedback = (uint8_t)(feedback & 7);

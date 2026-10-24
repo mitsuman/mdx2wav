@@ -431,6 +431,14 @@ void VgmFilePlayer::GetVoiceStates(VoiceState out[kFmChannels]) const {
         s.pan_left = pl;
         s.pan_right = pr;
         s.key_on = kon;
+        s.note_on = false;
+        if (audio_) {
+          const uint32_t kon_count = audio_->KonCounter(ch);
+          if (kon_count != kon_seen_[ch]) {
+            kon_seen_[ch] = kon_count;
+            s.note_on = true;
+          }
+        }
         for (int op = 0; op < 4; op++) s.eg_out[op] = eo[op];
         s.note = FnumToNote(fnum, block, opn2_clock_);
         s.active = kon != 0 || eo[0] < 1023 || eo[1] < 1023 ||

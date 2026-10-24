@@ -55,6 +55,10 @@ const int16_t* LibVgmAudio::Ym2612Wave(int ch, uint32_t* pos) const {
   return nukedopn2_vis_wave(ch);
 }
 
+uint32_t LibVgmAudio::KonCounter(int ch) const {
+  return nukedopn2_vis_kon(ch);
+}
+
 bool LibVgmAudio::DacEnabled() const {
   return nukedopn2_vis_dac_enabled() != 0;
 }

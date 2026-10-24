@@ -23,6 +23,8 @@ class LibVgmAudio {
                   int* panr, int* egout, int* kon) const;
   const int16_t* Ym2612Wave(int ch, uint32_t* pos) const;
   // YM2612 DAC channel (channel 6 sample playback).
+  // Number of key-ons seen for a channel (used to latch the keyboard note).
+  uint32_t KonCounter(int ch) const;
   bool DacEnabled() const;
   const int16_t* DacWave(uint32_t* pos) const;
   bool IsFinished() const { return finished_; }

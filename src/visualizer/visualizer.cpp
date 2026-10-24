@@ -2944,7 +2944,7 @@ void Visualizer::renderKeyboard() {
         bool key_on_edge = false;
         if (channel.key_on && !keyboard_key_on_prev_[ch]) key_on_edge = true;
         keyboard_key_on_prev_[ch] = channel.key_on;
-        if (spc_mode_ && channel.spc_note_on) key_on_edge = true;
+        if ((spc_mode_ || vgm_mode_) && channel.spc_note_on) key_on_edge = true;
 
         // The keyboard position is latched at note-on for every format; pitch
         // changes after that are shown elsewhere (operator pitch for MDX, the

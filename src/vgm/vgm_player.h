@@ -26,6 +26,7 @@ class VgmFilePlayer {
     int pan_left, pan_right;
     int eg_out[4];      // operator attenuation (0..1023, 0 = loudest)
     int key_on;
+    bool note_on;
     int16_t waveform[kWaveformSamples];
     int waveform_samples;
   };
@@ -82,6 +83,7 @@ class VgmFilePlayer {
   std::string title_;
 
   LibVgmAudio* audio_ = nullptr;
+  mutable uint32_t kon_seen_[kFmChannels] = {0, 0, 0, 0, 0, 0};
   mutable uint32_t last_dac_pos_ = 0;
   mutable int dac_stall_ = 0;
   std::vector<int16_t> lib_audio_;

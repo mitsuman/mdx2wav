@@ -187,7 +187,7 @@ public:
 
     // Fill one channel from the VGM (YM2612) player: key state, note, algorithm
     // and the four operator envelopes plus the channel waveform.
-    void updateVGMChannel(int ch, bool key_on, int note, int algorithm,
+    void updateVGMChannel(int ch, bool key_on, bool note_on, int note, int algorithm,
                           int feedback, bool pan_left, bool pan_right,
                           const int eg_out[4], const int eg_phase[4],
                           const int16_t* waveform, int waveform_samples);

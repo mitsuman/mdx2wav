@@ -1474,7 +1474,8 @@ reload_file:
               // 0 loudest .. 1023 silent; map roughly onto the EG phases.
               eg_phase[op] = vs[ch].key_on ? (eg_out[op] < 64 ? 1 : 3) : 4;
             }
-            ym_state->updateVGMChannel(ch, vs[ch].active != 0, vs[ch].note,
+            ym_state->updateVGMChannel(ch, vs[ch].active != 0, vs[ch].note_on,
+                                       vs[ch].note,
                                        vs[ch].algorithm, vs[ch].feedback,
                                        vs[ch].pan_left != 0,
                                        vs[ch].pan_right != 0, eg_out, eg_phase,

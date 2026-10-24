@@ -11,6 +11,7 @@ extern "C" {
 #endif
 const INT16* nukedopn2_vis_wave(int ch);
 UINT32 nukedopn2_vis_pos(int ch);
+UINT32 nukedopn2_vis_kon(int ch);
 const INT16* nukedopn2_vis_dac(void);
 UINT32 nukedopn2_vis_dac_pos(void);
 int nukedopn2_vis_dac_enabled(void);
