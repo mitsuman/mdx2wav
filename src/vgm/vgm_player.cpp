@@ -6,6 +6,8 @@
 
 #include <algorithm>
 
+#include "libvgm_backend.h"
+
 namespace {
 
 uint32_t ReadU32(const std::vector<uint8_t>& d, size_t off) {
@@ -27,7 +29,12 @@ int FnumToNote(int fnum, int block, int clock) {
 
 }  // namespace
 
-bool VGMPlayer::Load(const char* path, std::string* error) {
+VgmFilePlayer::~VgmFilePlayer() {
+  delete audio_;
+  audio_ = nullptr;
+}
+
+bool VgmFilePlayer::Load(const char* path, std::string* error) {
   FILE* f = fopen(path, "rb");
   if (!f) {
     if (error) *error = "Cannot open VGM file";
@@ -85,11 +92,26 @@ bool VGMPlayer::Load(const char* path, std::string* error) {
   if (dot != std::string::npos) title_.erase(dot);
 
   duration_ = total_samples_ > 0 ? (double)total_samples_ / 44100.0 : 0.0;
+
+  // The audio itself comes from libvgm; our parser/synth only feeds the
+  // visualizer below.
+  delete audio_;
+  audio_ = new LibVgmAudio();
+  std::string lib_error;
+  if (!audio_->Load(path, &lib_error)) {
+    if (error) *error = lib_error;
+    delete audio_;
+    audio_ = nullptr;
+    return false;
+  }
+  const double lib_time = audio_->TotalTime();
+  if (lib_time > 0.0) duration_ = lib_time;
   (void)version;
   return true;
 }
 
-void VGMPlayer::Start(int loop, double max_duration, double fade_seconds) {
+void VgmFilePlayer::Start(int loop, double max_duration, double fade_seconds) {
+  if (audio_) audio_->Start(loop, fade_seconds);
   loop_ = loop > 0 ? loop : 1;
   fade_ = fade_seconds > 0.0 ? fade_seconds : 0.0;
   pos_ = data_offset_;
@@ -111,7 +133,7 @@ void VGMPlayer::Start(int loop, double max_duration, double fade_seconds) {
   }
 }
 
-void VGMPlayer::WriteOpn2(int port, uint8_t data) {
+void VgmFilePlayer::WriteOpn2(int port, uint8_t data) {
   // A write is only applied when the chip's internal slot counter reaches the
   // register's slot, and the next address write would cancel it, so run a full
   // channel cycle (12 clocks) after every byte.  Those cycles are subtracted
@@ -122,7 +144,7 @@ void VGMPlayer::WriteOpn2(int port, uint8_t data) {
   pending_skip_ += 12;
 }
 
-bool VGMPlayer::RunCommand() {
+bool VgmFilePlayer::RunCommand() {
   if (pos_ >= data_.size()) return false;
   const uint8_t c = data_[pos_++];
   switch (c) {
@@ -236,7 +258,7 @@ bool VGMPlayer::RunCommand() {
   return true;
 }
 
-void VGMPlayer::ClockChips() {
+void VgmFilePlayer::ClockChips() {
   if (has_opn2_) {
     // The chip multiplexes its six channels over 24 master cycles, so one
     // output sample is the sum of all 24 clocks (not just the last one).
@@ -258,14 +280,23 @@ void VGMPlayer::ClockChips() {
   }
 }
 
-int VGMPlayer::Generate(int16_t* out, int frames) {
+int VgmFilePlayer::Generate(int16_t* out, int frames) {
   if (!out || frames <= 0) return 0;
   if (finished_) return 0;
+
+  // Audio comes from libvgm; it also dictates how many frames this call
+  // produces (0 = end of song).
+  lib_audio_.resize((size_t)frames * 2);
+  const int got = audio_ ? audio_->Render(lib_audio_.data(), frames) : 0;
+  if (got <= 0) {
+    finished_ = true;
+    return 0;
+  }
 
   const double chip_rate = has_opn2_ ? (double)opn2_clock_ / 144.0 : 44100.0;
   const double chip_step = chip_rate / 44100.0;
 
-  for (int i = 0; i < frames; i++) {
+  for (int i = 0; i < got; i++) {
     while (wait_ == 0 && !finished_) {
       if (!RunCommand()) finished_ = true;
     }
@@ -320,22 +351,23 @@ int VGMPlayer::Generate(int16_t* out, int frames) {
     if (duration_ > 0.0 && elapsed_ >= duration_) finished_ = true;
   }
 
+  // Replace the local synth's audio with libvgm's rendering.
+  memcpy(out, lib_audio_.data(), (size_t)got * 2 * sizeof(int16_t));
   if (finished_) {
-    // Silence the rest of this buffer.
-    for (int i = 0; i < frames; i++) {
+    for (int i = 0; i < got; i++) {
       out[i * 2 + 0] = 0;
       out[i * 2 + 1] = 0;
     }
     return 0;
   }
-  return frames;
+  return got;
 }
 
-void VGMPlayer::GetPsgStates(SN76489::ChannelState out[SN76489::kChannels]) const {
+void VgmFilePlayer::GetPsgStates(SN76489::ChannelState out[SN76489::kChannels]) const {
   psg_.GetStates(out);
 }
 
-void VGMPlayer::GetVoiceStates(VoiceState out[kFmChannels]) const {
+void VgmFilePlayer::GetVoiceStates(VoiceState out[kFmChannels]) const {
   for (int ch = 0; ch < kFmChannels; ch++) {
     VoiceState& s = out[ch];
     memset(&s, 0, sizeof(s));

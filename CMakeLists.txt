@@ -41,6 +41,7 @@ set(MDX2WAV_SOURCES
 	gamdx/psf/he/spucore.c
 	gamdx/psf/he/vfs.c
 	src/vgm/vgm_player.cpp
+	src/vgm/libvgm_backend.cpp
 	src/vgm/sn76489.cpp
 	gamdx/opn2/ym3438.c
 )
@@ -97,6 +98,19 @@ set_source_files_properties(
 add_executable(mdx2wav ${MDX2WAV_SOURCES})
 target_compile_definitions(mdx2wav PRIVATE EMU_COMPILE EMU_LITTLE_ENDIAN)
 target_include_directories(mdx2wav PRIVATE gamdx/psf gamdx/psf/he)
+# libvgm for accurate VGM playback (player + sound emulation cores).
+set(BUILD_LIBAUDIO OFF CACHE BOOL "" FORCE)
+# Only the chips VGM playback needs (YM2612 + SN76489); building every core
+# would also clash with the YM2151 we already ship.
+set(SNDEMU__ALL OFF CACHE BOOL "" FORCE)
+set(SNDEMU_YM2612_NUKED ON CACHE BOOL "" FORCE)
+set(SNDEMU_SN76496_MAME ON CACHE BOOL "" FORCE)
+set(BUILD_PLAYER OFF CACHE BOOL "" FORCE)
+set(BUILD_VGM2WAV OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/libvgm EXCLUDE_FROM_ALL)
+target_link_libraries(mdx2wav vgm-player vgm-emu vgm-utils)
+
 find_package(ZLIB REQUIRED)
 target_link_libraries(mdx2wav ZLIB::ZLIB)
 

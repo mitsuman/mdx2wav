@@ -9,8 +9,12 @@
 #include "../../gamdx/opn2/ym3438.h"
 #include "sn76489.h"
 
+// libvgm provides the actual VGM playback (accurate chip cores and timing);
+// our own parser and OPN2 instance are only used for the visualizer state.
+class LibVgmAudio;
+
 // Plays Sega Genesis style VGM files: YM2612 (Nuked OPN2) plus SN76489 PSG.
-class VGMPlayer {
+class VgmFilePlayer {
  public:
   enum { kFmChannels = 6, kWaveformSamples = 1024 };
 
@@ -25,6 +29,8 @@ class VGMPlayer {
     int16_t waveform[kWaveformSamples];
     int waveform_samples;
   };
+
+  ~VgmFilePlayer();
 
   bool Load(const char* path, std::string* error);
   void Start(int loop, double max_duration, double fade_seconds);
@@ -67,6 +73,9 @@ class VGMPlayer {
   int loop_ = 1;
   bool finished_ = false;
   std::string title_;
+
+  LibVgmAudio* audio_ = nullptr;
+  std::vector<int16_t> lib_audio_;
 
   int16_t wave_ring_[kFmChannels][kWaveformSamples];
   uint32_t wave_pos_[kFmChannels];

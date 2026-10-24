@@ -102,11 +102,14 @@ so it is opt-in.
 
 ## VGM support
 
-`.vgm` files (or files starting with the `Vgm ` signature) are played with
-Nuked-OPN2 (LGPL-2.1) for the YM2612 and a small SN76489 PSG, i.e. Sega Mega
-Drive style logs.  The visualizer reuses the YM2151 layout with six FM
-channels plus a PSG section (three tone channels and noise, with note,
-volume and waveform).  Other chips (YM2151, YM2608, ...) and GD3 titles are not handled
+`.vgm` files (or files starting with the `Vgm ` signature) are played through
+[libvgm](https://github.com/ValleyBell/libvgm) (player + Nuked OPN2 and MAME
+SN76489 cores), which handles the command timing and chip mixing.  The
+per-channel display is fed by a small parallel parser (see below) because
+libvgm does not expose the chip state.  The visualizer reuses the YM2151 layout with six FM
+channels plus a PSG section (three tone channels and noise, with note, volume
+and waveform); that display comes from mdx2wav's own YM2612/SN76489 mirrors,
+which are clocked alongside libvgm purely for visualization.  Other chips (YM2151, YM2608, ...) and GD3 titles are not handled
 yet; the title is taken from the file name.
 
 ## PSF support
