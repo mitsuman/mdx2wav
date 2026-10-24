@@ -372,10 +372,36 @@ void VgmFilePlayer::GetDacState(DacState* out) const {
   uint32_t pos = 0;
   const int16_t* ring = audio_->DacWave(&pos);
   if (!ring) return;
+  // A steady DAC value produces no new samples; hide the row instead of
+  // showing the previous waveform.
+  if (pos == last_dac_pos_) {
+    dac_stall_++;
+  } else {
+    last_dac_pos_ = pos;
+    dac_stall_ = 0;
+  }
+  if (dac_stall_ > 30) return;
+
   const int count = kWaveformSamples;
+  // A DAC that only idles around the centre (127/128) is silence: don't let
+  // the auto scale blow it up into a noisy band.
+  int peak = 0;
   for (int j = 0; j < count; j++) {
-    // dacdata is a 9-bit unsigned domain centred at 255; centre and scale it.
-    int v = (ring[(pos - count + j) & (count - 1)] - 255) * 64;
+    const int raw = ring[(pos - count + j) & (count - 1)] & 0x1FF;
+    const int sv = ((int16_t)(raw << 7)) >> 7;
+    const int a = sv < 0 ? -sv : sv;
+    if (a > peak) peak = a;
+  }
+  if (peak < 4) {
+    out->waveform_samples = 0;
+    return;
+  }
+  for (int j = 0; j < count; j++) {
+    // dacdata is a 9-bit signed value (bit 8 is the sign); mirror what the
+    // chip does for the audio before scaling it.
+    const int raw = ring[(pos - count + j) & (count - 1)] & 0x1FF;
+    const int sv = ((int16_t)(raw << 7)) >> 7;
+    int v = sv * 64;
     if (v > 32767) v = 32767;
     if (v < -32768) v = -32768;
     out->waveform[j] = (int16_t)v;

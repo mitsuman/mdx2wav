@@ -2794,9 +2794,11 @@ void Visualizer::renderVGMDAC(int& y) {
     renderBitmapText("6ch sample out", 86, y + 14, v.enabled ? 150 : 50,
                      v.enabled ? 170 : 60, v.enabled ? 220 : 80);
 
+    // The DAC is 8-bit PCM with a known full scale, so use a fixed scale
+    // instead of the auto scale (otherwise quiet idling looks like noise).
     renderChannelWaveform(wave_x, y + 2, wave_w, wave_h, v.waveform,
                           v.enabled ? v.waveform_samples : 0, 255, 200, 120,
-                          8 + 4, 1.0f, true);
+                          8 + 4, 2.0f, false);
     y += row_h;
 }
 

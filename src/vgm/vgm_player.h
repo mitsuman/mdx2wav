@@ -82,6 +82,8 @@ class VgmFilePlayer {
   std::string title_;
 
   LibVgmAudio* audio_ = nullptr;
+  mutable uint32_t last_dac_pos_ = 0;
+  mutable int dac_stall_ = 0;
   std::vector<int16_t> lib_audio_;
 
   int16_t wave_ring_[kFmChannels][kWaveformSamples];
