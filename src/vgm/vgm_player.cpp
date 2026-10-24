@@ -380,7 +380,7 @@ void VgmFilePlayer::GetDacState(DacState* out) const {
     last_dac_pos_ = pos;
     dac_stall_ = 0;
   }
-  if (dac_stall_ > 30) return;
+  if (dac_stall_ > 8) return;
 
   const int count = kWaveformSamples;
   // A DAC that only idles around the centre (127/128) is silence: don't let
