@@ -374,7 +374,8 @@ void VgmFilePlayer::GetDacState(DacState* out) const {
   if (!ring) return;
   const int count = kWaveformSamples;
   for (int j = 0; j < count; j++) {
-    int v = ring[(pos - count + j) & (count - 1)] * 64;
+    // dacdata is a 9-bit unsigned domain centred at 255; centre and scale it.
+    int v = (ring[(pos - count + j) & (count - 1)] - 255) * 64;
     if (v > 32767) v = 32767;
     if (v < -32768) v = -32768;
     out->waveform[j] = (int16_t)v;

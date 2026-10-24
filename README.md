@@ -108,8 +108,8 @@ SN76489 cores), which handles the command timing and chip mixing.  The
 per-channel FM display reads the very chip libvgm plays (a small capture hook
 was added to libvgm's ym3438 core), so the waveform always matches the audio;
 the PSG rows still use mdx2wav's own SN76489 mirror.  The visualizer reuses the YM2151 layout with six FM
-channels plus a DAC row (channel 6 PCM, with its sample stream, only for songs that
-enable the DAC) and a PSG section
+channels plus a DAC row (channel 6 PCM, showing the actual sample stream, only for
+songs that enable the DAC) and a PSG section
 (three tone channels and noise, with note, volume and waveform); that display comes from mdx2wav's own YM2612/SN76489 mirrors,
 which are clocked alongside libvgm purely for visualization.  Other chips (YM2151, YM2608, ...) and GD3 titles are not handled
 yet; the title is taken from the file name.

@@ -1573,6 +1573,7 @@ static Bit32u g_vis_pos[VIS_CHANNELS];
 static Bit16s g_vis_dac[VIS_SAMPLES];
 static Bit32u g_vis_dac_pos;
 static int g_vis_dac_en;
+static Bit16s g_vis_dac_last;
 
 const INT16* nukedopn2_vis_dac(void)
 {
@@ -1627,7 +1628,13 @@ void nukedopn2_update(void *chip, UINT32 numsamples, DEV_SMPL **sndptr)
         *smpr++ = buffer[1];
         for (ch = 0; ch < VIS_CHANNELS; ch ++)
             g_vis_wave[ch][g_vis_pos[ch] ++ & (VIS_SAMPLES - 1)] = opn2->ch_out[ch];
-        g_vis_dac[g_vis_dac_pos ++ & (VIS_SAMPLES - 1)] = opn2->dacdata;
+        /* Record the PCM stream itself (on change), not the sample-and-hold
+           output, so the DAC row shows the actual samples. */
+        if (opn2->dacdata != g_vis_dac_last)
+        {
+            g_vis_dac[g_vis_dac_pos ++ & (VIS_SAMPLES - 1)] = opn2->dacdata;
+            g_vis_dac_last = opn2->dacdata;
+        }
         g_vis_dac_en = opn2->dacen ? 1 : 0;
     }
 }
