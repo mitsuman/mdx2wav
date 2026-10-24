@@ -263,7 +263,11 @@ void VgmFilePlayer::ClockChips() {
     int16_t buf[2] = {0, 0};
     int clocks = 24;
     if (pending_skip_ > 0) {
-      const int skip = pending_skip_ < clocks ? pending_skip_ : clocks;
+      // Repay the cycles spent latching writes, but never skip the whole
+      // sample: with dense register activity the display chip would stop
+      // advancing and its waveform would freeze.
+      const int max_skip = 4;
+      const int skip = pending_skip_ < max_skip ? pending_skip_ : max_skip;
       clocks -= skip;
       pending_skip_ -= skip;
     }

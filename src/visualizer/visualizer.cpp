@@ -1068,6 +1068,14 @@ void Visualizer::setScreenshotMode(const char* filename) {
 
 void Visualizer::setSongTitle(const char* title) {
     if (!title) return;
+
+    // A new song starts a new waveform history: drop the phase-lock state so
+    // the first frames re-lock instead of holding the previous song's offset.
+    for (int i = 0; i < MAX_CHANNELS; i++) {
+        has_prev_waveform_[i] = false;
+        prev_waveform_offset_[i] = 0;
+        waveform_dynamic_scale_[i] = 1.0f;
+    }
     
     // Shift_JISかUTF-8に変換
     iconv_t cd = iconv_open("UTF-8", "SHIFT_JIS");
