@@ -1066,6 +1066,7 @@ reload_file:
   // A directory may contain several formats; decide again for every file.
   is_spc = is_spc_path(mdx_name);
   is_psf = !is_spc && is_psf_path(mdx_name);
+  is_vgm = !is_spc && !is_psf && is_vgm_path(mdx_name);
 
 #ifdef ENABLE_VISUALIZER
   if (visualizer) {
