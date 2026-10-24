@@ -58,6 +58,7 @@ class VGMPlayer {
   bool has_psg_ = false;
 
   double chip_phase_ = 0.0;
+  int pending_skip_ = 0;   // chip cycles already spent while latching writes
   int16_t last_l_ = 0, last_r_ = 0;
   double dc_l_ = 0.0, dc_r_ = 0.0;   // DC blocker state (YM2612 DAC bias)
   double elapsed_ = 0.0;

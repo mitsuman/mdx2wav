@@ -99,6 +99,7 @@ void VGMPlayer::Start(int loop, double max_duration, double fade_seconds) {
   chip_phase_ = 0.0;
   last_l_ = last_r_ = 0;
   dc_l_ = dc_r_ = 0.0;
+  pending_skip_ = 0;
   OPN2_Reset(&opn2_);
   psg_.Reset(3579545);
   for (int i = 0; i < kFmChannels; i++) {
@@ -111,11 +112,14 @@ void VGMPlayer::Start(int loop, double max_duration, double fade_seconds) {
 }
 
 void VGMPlayer::WriteOpn2(int port, uint8_t data) {
-  // The chip latches an address and a data byte on separate cycles, so let it
-  // run a few cycles after every write (as a real VGM player does).
+  // A write is only applied when the chip's internal slot counter reaches the
+  // register's slot, and the next address write would cancel it, so run a full
+  // channel cycle (12 clocks) after every byte.  Those cycles are subtracted
+  // from the normal per-sample clocks so the song keeps its timing.
   OPN2_Write(&opn2_, (uint32_t)port, data);
   int16_t scratch[2];
-  for (int k = 0; k < 3; k++) OPN2_Clock(&opn2_, scratch);
+  for (int k = 0; k < 12; k++) OPN2_Clock(&opn2_, scratch);
+  pending_skip_ += 12;
 }
 
 bool VGMPlayer::RunCommand() {
@@ -238,7 +242,13 @@ void VGMPlayer::ClockChips() {
     // output sample is the sum of all 24 clocks (not just the last one).
     int acc_l = 0, acc_r = 0;
     int16_t buf[2] = {0, 0};
-    for (int k = 0; k < 24; k++) {
+    int clocks = 24;
+    if (pending_skip_ > 0) {
+      const int skip = pending_skip_ < clocks ? pending_skip_ : clocks;
+      clocks -= skip;
+      pending_skip_ -= skip;
+    }
+    for (int k = 0; k < clocks; k++) {
       OPN2_Clock(&opn2_, buf);
       acc_l += buf[0];
       acc_r += buf[1];
