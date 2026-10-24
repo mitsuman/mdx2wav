@@ -165,6 +165,7 @@ public:
         int waveform_samples;
     };
     void setPSFMode(bool enabled);
+    void setVGMMode(bool enabled) { vgm_mode_ = enabled; }
     void setSampleRate(int rate) { sample_rate_ = rate; }
     bool isPSFMode() const { return psf_mode_; }
     void updatePSFState(const PSFVoice* voices, int count,
@@ -299,6 +300,7 @@ private:
     
     // ファイルリスト管理
     bool psf_mode_;
+    bool vgm_mode_;
     int sample_rate_;
     PSFVoice psf_voices_[24];
     int psf_voice_count_;

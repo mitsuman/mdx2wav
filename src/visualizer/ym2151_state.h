@@ -185,6 +185,13 @@ public:
     // fmgenから直接EG情報を更新（OPMポインタを受け取る）
     void updateFromFmgen(void *opm_ptr);
 
+    // Fill one channel from the VGM (YM2612) player: key state, note, algorithm
+    // and the four operator envelopes plus the channel waveform.
+    void updateVGMChannel(int ch, bool key_on, int note, int algorithm,
+                          int feedback, bool pan_left, bool pan_right,
+                          const int eg_out[4], const int eg_phase[4],
+                          const int16_t* waveform, int waveform_samples);
+
 private:
     Channel channels_[8];
     ADPCMChannel adpcm_channels_[8];

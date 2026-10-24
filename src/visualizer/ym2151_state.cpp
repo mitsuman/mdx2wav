@@ -389,6 +389,37 @@ void YM2151State::setSPCMode(bool enabled) {
     pthread_mutex_unlock(&mutex_);
 }
 
+void YM2151State::updateVGMChannel(int ch, bool key_on, int note, int algorithm,
+                                   int feedback, bool pan_left, bool pan_right,
+                                   const int eg_out[4], const int eg_phase[4],
+                                   const int16_t* waveform, int waveform_samples) {
+    if (ch < 0 || ch >= 8) return;
+    pthread_mutex_lock(&mutex_);
+    Channel& c = channels_[ch];
+    c.key_on = key_on;
+    c.note = (uint8_t)std::max(0, std::min(127, note));
+    c.algorithm = (uint8_t)(algorithm & 7);
+    c.feedback = (uint8_t)(feedback & 7);
+    c.left_right = (pan_left ? 0x80 : 0) | (pan_right ? 0x40 : 0);
+    c.operator_mask = 0x0F;
+    c.velocity = 127;
+    for (int op = 0; op < 4; op++) {
+        Operator& o = c.operators[op];
+        o.eg_out = std::max(0, std::min(1023, eg_out[op]));
+        o.eg_level = o.eg_out;
+        o.key_on = key_on;
+        o.eg_phase = eg_phase[op];
+    }
+    if (waveform && waveform_samples > 0) {
+        const int n = std::min(waveform_samples, 800);
+        for (int i = 0; i < n; i++) channel_waveforms_[ch][i] = waveform[i];
+        c.spc_waveform_samples = n;
+    } else {
+        c.spc_waveform_samples = 0;
+    }
+    pthread_mutex_unlock(&mutex_);
+}
+
 void YM2151State::updateSPCVoice(int ch, bool key_on, bool note_on, bool kon,
                                  int note, float pitch_note, int volume,
                                  int left_volume, int right_volume, int pitch,

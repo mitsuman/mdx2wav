@@ -109,6 +109,7 @@ Visualizer::Visualizer()
     , file_list_count_(0)
     , current_file_index_(0)
     , psf_mode_(false)
+    , vgm_mode_(false)
     , sample_rate_(44100)
     , psf_voice_count_(0)
     , psf_master_left_(0)
@@ -2422,7 +2423,11 @@ void Visualizer::renderTimerInfo() {
     state_->getTimerState(timer);
     
     // システム情報を表示（TIMER-Aと同じ行）
-    renderBitmapText("SHARP X68000 / MXDRV 2.06+17 Rel.X5-S / MXDRVg V1.50a / mdx2wav 20251225 by mtm", x, y, 100, 140, 200);
+    if (vgm_mode_) {
+        renderBitmapText("SEGA MEGA DRIVE / YM2612 + SN76489 / VGM playback by mdx2wav", x, y, 100, 140, 200);
+    } else {
+        renderBitmapText("SHARP X68000 / MXDRV 2.06+17 Rel.X5-S / MXDRVg V1.50a / mdx2wav 20251225 by mtm", x, y, 100, 140, 200);
+    }
     
     // TIMER情報をシステム情報の右側に配置
     int timer_x = x + 640;  // システム情報の右側から開始
@@ -2542,14 +2547,14 @@ void Visualizer::renderChannelInfo() {
         
         // "YAMAHA"ラベルを表示（チャンネル番号の下、YM2151の上）
         if (bitmap_font_texture_) {
-            renderBitmapText("YAMAHA", 10, seg_y + 20, seg_r, seg_g, seg_b);
+            renderBitmapText(vgm_mode_ ? "SEGA" : "YAMAHA", 10, seg_y + 20, seg_r, seg_g, seg_b);
         } else if (font_sm) {
             renderText(renderer_, font_sm, "YAMAHA", 10, seg_y + 20, seg_r, seg_g, seg_b);
         }
         
         // "YM2151"ラベルを表示（YAMAHAの下）
         if (bitmap_font_texture_) {
-            renderBitmapText("YM2151", 10, seg_y + 28, seg_r, seg_g, seg_b);
+            renderBitmapText(vgm_mode_ ? "YM2612" : "YM2151", 10, seg_y + 28, seg_r, seg_g, seg_b);
         } else if (font_sm) {
             renderText(renderer_, font_sm, "YM2151", 10, seg_y + 28, seg_r, seg_g, seg_b);
         }

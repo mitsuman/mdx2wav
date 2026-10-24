@@ -17,6 +17,7 @@
 #include "command_line_parser.h"
 #include "spc/spc_player.h"
 #include "psf/psf_player.h"
+#include "vgm/vgm_player.h"
 
 #ifdef __APPLE__
 #include "platform_mac.h"
@@ -44,6 +45,19 @@ static pthread_mutex_t g_spc_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static PSFPlayer* g_psf_audio_player = nullptr;
 static pthread_mutex_t g_psf_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static VGMPlayer* g_vgm_audio_player = nullptr;
+static pthread_mutex_t g_vgm_audio_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static int VgmAudioFill(short* out, int frames) {
+  pthread_mutex_lock(&g_vgm_audio_mutex);
+  int len = 0;
+  if (g_vgm_audio_player && !g_vgm_audio_player->IsFinished()) {
+    len = g_vgm_audio_player->Generate((int16_t*)out, frames);
+  }
+  pthread_mutex_unlock(&g_vgm_audio_mutex);
+  return len;
+}
 
 static int PsfAudioFill(short* out, int frames) {
   pthread_mutex_lock(&g_psf_audio_mutex);
@@ -128,6 +142,17 @@ static bool is_psf_path(const char* path) {
   const size_t got = fread(signature, 1, sizeof(signature), f);
   fclose(f);
   return got == 4 && memcmp(signature, "PSF\x01", 4) == 0;
+}
+
+// VGM files, recognised by extension or by the "Vgm " signature.
+static bool is_vgm_path(const char* path) {
+  if (ends_with_ci(path, ".vgm")) return true;
+  FILE* f = fopen(path, "rb");
+  if (!f) return false;
+  unsigned char signature[4];
+  const size_t got = fread(signature, 1, sizeof(signature), f);
+  fclose(f);
+  return got == 4 && memcmp(signature, "Vgm ", 4) == 0;
 }
 
 static bool read_file_exact(const char* name, std::vector<unsigned char>* out) {
@@ -326,6 +351,7 @@ bool hasMusicExtension(const char* name) {
   if (len > 4 && strcasecmp(name + len - 4, ".spc") == 0) return true;
   if (len > 4 && strcasecmp(name + len - 4, ".psf") == 0) return true;
   if (len > 8 && strcasecmp(name + len - 8, ".minipsf") == 0) return true;
+  if (len > 4 && strcasecmp(name + len - 4, ".vgm") == 0) return true;
   return false;
 }
 
@@ -769,6 +795,7 @@ int main(int argc, char **argv) {
 
   bool is_spc = is_spc_path(mdx_name);
   bool is_psf = !is_spc && is_psf_path(mdx_name);
+  bool is_vgm = !is_spc && !is_psf && is_vgm_path(mdx_name);
 
   // Recently played files, persisted between runs (up to 1024).
   std::vector<std::string> history = loadHistory();
@@ -862,6 +889,7 @@ int main(int argc, char **argv) {
     }
     is_spc = is_spc_path(mdx_name);
     is_psf = !is_spc && is_psf_path(mdx_name);
+    is_vgm = !is_spc && !is_psf && is_vgm_path(mdx_name);
 
     // YM2151状態管理オブジェクト作成
     ym_state = new YM2151State();
@@ -877,7 +905,7 @@ int main(int argc, char **argv) {
     if (is_spc) {
       ym2151_channels = 8;
       adpcm_channels = 0;
-    } else if (!is_psf && !options.no_auto_size && !get_title &&
+    } else if (!is_psf && !is_vgm && !options.no_auto_size && !get_title &&
                !measure_play_time) {
       // Fit the window to the channels the song really uses.
       int fm_used = 0, adpcm_used = 0;
@@ -890,13 +918,18 @@ int main(int argc, char **argv) {
                 ym2151_channels, adpcm_channels);
       }
     }
+    if (is_vgm) {
+      ym2151_channels = 6;   // YM2612 FM channels
+      adpcm_channels = 0;
+    }
     int window_height = is_psf
         ? 844
         : (is_spc ? 720
-                  : 75 + (ym2151_channels * 70) + (adpcm_channels * 45) + 20);
+                  : (is_vgm ? 75 + 6 * 70 + 20
+                            : 75 + (ym2151_channels * 70) + (adpcm_channels * 45) + 20));
     // The spectrum strip is opt-in (--spectrum); without it the window is
     // narrower.  PSF never shows a spectrum.
-    const bool want_spectrum = options.enable_spectrum && !is_psf;
+    const bool want_spectrum = options.enable_spectrum && !is_psf && !is_vgm;
     const int window_width = want_spectrum ? 1400 : 1080;
 
     // 動画モードの場合は高さを偶数に調整（H.264要件）
@@ -923,7 +956,9 @@ int main(int argc, char **argv) {
     } else {
       // 通常の表示モード
       init_success = visualizer->init(
-          is_spc ? "SPC Visualizer" : (is_psf ? "PSF Visualizer" : "MDX Visualizer"),
+          is_spc ? "SPC Visualizer"
+                 : (is_psf ? "PSF Visualizer"
+                           : (is_vgm ? "VGM Visualizer" : "MDX Visualizer")),
           window_width, window_height);
       if (!init_success) {
         fprintf(stderr, "Failed to initialize visualizer\n");
@@ -936,6 +971,7 @@ int main(int argc, char **argv) {
     visualizer->setState(ym_state);
     visualizer->setSPCMode(is_spc);
     visualizer->setPSFMode(is_psf);
+    visualizer->setVGMMode(is_vgm);
 
     // 表示チャンネル数を設定
     visualizer->setDisplayChannels(is_spc ? 8 : ym2151_channels,
@@ -1002,9 +1038,10 @@ int main(int argc, char **argv) {
 
   SPCPlayer* spc_player = nullptr;
   PSFPlayer* psf_player = nullptr;
+  VGMPlayer* vgm_player = nullptr;
   bool mdx_started = false;
 
-  if (!is_spc && !is_psf) {
+  if (!is_spc && !is_psf && !is_vgm) {
     MXDRVG_Start(SAMPLE_RATE, filter_mode, MDX_BUF_SIZE, PDX_BUF_SIZE);
     MXDRVG_TotalVolume(256);
     mdx_started = true;
@@ -1034,6 +1071,7 @@ reload_file:
   if (visualizer) {
     visualizer->setSPCMode(is_spc);
     visualizer->setPSFMode(is_psf);
+    visualizer->setVGMMode(is_vgm);
     visualizer->setDisplayChannels(is_spc ? 8 : ym2151_channels,
                                   is_spc ? 0 : adpcm_channels);
   }
@@ -1048,7 +1086,7 @@ reload_file:
     MXDRVG_End();
     mdx_started = false;
   }
-  if (!is_spc && !is_psf) {
+  if (!is_spc && !is_psf && !is_vgm) {
     MXDRVG_Start(SAMPLE_RATE, filter_mode, MDX_BUF_SIZE, PDX_BUF_SIZE);
     MXDRVG_TotalVolume(256);
     mdx_started = true;
@@ -1130,6 +1168,33 @@ reload_file:
 #ifdef __APPLE__
     setAudioPCMFillFunc(PsfAudioFill);
 #endif
+  } else if (is_vgm) {
+    if (!vgm_player) {
+      vgm_player = new VGMPlayer();
+#ifdef __APPLE__
+      g_vgm_audio_player = vgm_player;
+#endif
+    }
+#ifdef __APPLE__
+    pthread_mutex_lock(&g_vgm_audio_mutex);
+#endif
+    std::string vgm_error;
+    const bool vgm_loaded = vgm_player->Load(mdx_name, &vgm_error);
+    if (vgm_loaded) {
+      vgm_player->Start(loop, max_song_duration, fadeout ? 3.0 : 0.0);
+    }
+#ifdef __APPLE__
+    pthread_mutex_unlock(&g_vgm_audio_mutex);
+#endif
+    if (!vgm_loaded) {
+      fprintf(stderr, "Cannot load VGM %s: %s\n", mdx_name, vgm_error.c_str());
+      return -1;
+    }
+    strncpy(title, vgm_player->Title(), sizeof(title) - 1);
+    title[sizeof(title) - 1] = 0;
+#ifdef __APPLE__
+    setAudioPCMFillFunc(VgmAudioFill);
+#endif
   } else {
 #ifdef __APPLE__
     setAudioPCMFillFunc(nullptr);
@@ -1152,7 +1217,7 @@ reload_file:
       visualizer->setCurrentFileIndex(current_file_index);
     }
 
-    if (!is_spc && !is_psf) {
+    if (!is_spc && !is_psf && !is_vgm) {
       // ADPCM全体バッファ情報を取得して設定
       void* adpcm_buffer = MXDRVG_GetADPCMBuffer();
       ym_state->setADPCMBufferInfo(adpcm_buffer, pdx_size);
@@ -1184,6 +1249,8 @@ reload_file:
     song_duration = (float)spc_player->Duration();
   } else if (is_psf) {
     song_duration = (float)psf_player->Duration();
+  } else if (is_vgm) {
+    song_duration = (float)vgm_player->Duration();
   } else {
     song_duration = MXDRVG_MeasurePlayTime(loop, fadeout) / 1000.0f;
     // Warning: MXDRVG_MeasurePlayTime calls MXDRVG_End internaly,
@@ -1292,6 +1359,31 @@ reload_file:
                                      gs.master_volume_left, gs.master_volume_right,
                                      gs.reverb_enabled != 0);
         }
+      } else if (is_vgm) {
+        if (vgm_player && ym_state) {
+#ifdef __APPLE__
+          pthread_mutex_lock(&g_vgm_audio_mutex);
+#endif
+          VGMPlayer::VoiceState vs[VGMPlayer::kFmChannels];
+          vgm_player->GetVoiceStates(vs);
+#ifdef __APPLE__
+          pthread_mutex_unlock(&g_vgm_audio_mutex);
+#endif
+          for (int ch = 0; ch < VGMPlayer::kFmChannels; ch++) {
+            int eg_out[4];
+            int eg_phase[4];
+            for (int op = 0; op < 4; op++) {
+              eg_out[op] = vs[ch].eg_out[op];
+              // 0 loudest .. 1023 silent; map roughly onto the EG phases.
+              eg_phase[op] = vs[ch].key_on ? (eg_out[op] < 64 ? 1 : 3) : 4;
+            }
+            ym_state->updateVGMChannel(ch, vs[ch].active != 0, vs[ch].note,
+                                       vs[ch].algorithm, vs[ch].feedback,
+                                       vs[ch].pan_left != 0,
+                                       vs[ch].pan_right != 0, eg_out, eg_phase,
+                                       vs[ch].waveform, vs[ch].waveform_samples);
+          }
+        }
       } else if (opm_original) {
         void* opm_ptr = opm_original->GetOPMPointer();
         if (opm_ptr) {
@@ -1392,7 +1484,7 @@ reload_file:
         if (!visualizer->isRunning()) {
           break;
         }
-        if ((is_spc || is_psf) && spc_paused) {
+        if ((is_spc || is_psf || is_vgm) && spc_paused) {
           usleep(16 * 1000);
           continue;
         }
@@ -1407,6 +1499,10 @@ reload_file:
       }
     } else if (is_psf) {
       if (!play_audio && psf_player && psf_player->IsFinished()) {
+        break;
+      }
+    } else if (is_vgm) {
+      if (!play_audio && vgm_player && vgm_player->IsFinished()) {
         break;
       }
     } else {
@@ -1472,6 +1568,9 @@ reload_file:
     } else if (is_psf) {
       if (!psf_player || psf_player->IsFinished()) break;
       len = psf_player->Generate((int16_t*)audio_buf, samples_to_get);
+    } else if (is_vgm) {
+      if (!vgm_player || vgm_player->IsFinished()) break;
+      len = vgm_player->Generate((int16_t*)audio_buf, samples_to_get);
     } else {
       len = MXDRVG_GetPCM(audio_buf, samples_to_get);
     }

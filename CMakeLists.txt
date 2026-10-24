@@ -40,6 +40,9 @@ set(MDX2WAV_SOURCES
 	gamdx/psf/he/spu.c
 	gamdx/psf/he/spucore.c
 	gamdx/psf/he/vfs.c
+	src/vgm/vgm_player.cpp
+	src/vgm/sn76489.cpp
+	gamdx/opn2/ym3438.c
 )
 
 if(APPLE)
@@ -88,6 +91,7 @@ set_source_files_properties(
 	gamdx/psf/he/spu.c
 	gamdx/psf/he/spucore.c
 	gamdx/psf/he/vfs.c
+	gamdx/opn2/ym3438.c
 	PROPERTIES LANGUAGE C)
 
 add_executable(mdx2wav ${MDX2WAV_SOURCES})
