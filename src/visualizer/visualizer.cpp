@@ -111,6 +111,7 @@ Visualizer::Visualizer()
     , psf_mode_(false)
     , vgm_mode_(false)
     , psg_voice_count_(0)
+    , vgm_dac_used_(false)
     , sample_rate_(44100)
     , psf_voice_count_(0)
     , psf_master_left_(0)
@@ -2767,7 +2768,7 @@ void Visualizer::renderChannelInfo() {
     }
     // VGM の YM2612 DAC (チャンネル6のPCM) と SN76489 PSG
     if (vgm_mode_ && psg_voice_count_ > 0) {
-        renderVGMDAC(y);
+        if (vgm_dac_used_) renderVGMDAC(y);
         renderVGMPSG(y);
     }
 }
@@ -2819,7 +2820,7 @@ void Visualizer::renderVGMPSG(int& y) {
         const int seg_g = v.active ? CHANNEL_LABEL_COLOR_ACTIVE_G : CHANNEL_LABEL_COLOR_INACTIVE_G;
         const int seg_b = v.active ? CHANNEL_LABEL_COLOR_ACTIVE_B : CHANNEL_LABEL_COLOR_INACTIVE_B;
 
-        draw7Segment(20, y + 5, 7 + i, seg_r, seg_g, seg_b, 8, 7);
+        draw7Segment(20, y + 5, (vgm_dac_used_ ? 7 : 6) + i, seg_r, seg_g, seg_b, 8, 7);
         renderBitmapText("PSG", 10, y + 23, seg_r, seg_g, seg_b);
         renderBitmapText("SN76489", 10, y + 31, seg_r / 2, seg_g / 2, seg_b / 2);
 

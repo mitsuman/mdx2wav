@@ -155,6 +155,62 @@ static bool is_vgm_path(const char* path) {
   return got == 4 && memcmp(signature, "Vgm ", 4) == 0;
 }
 
+// Does this VGM ever enable the YM2612 DAC (register 0x2B, bit 7)?
+static bool vgmUsesDac(const char* path) {
+  FILE* f = fopen(path, "rb");
+  if (!f) return false;
+  fseek(f, 0, SEEK_END);
+  const long size = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  if (size <= 0x40) {
+    fclose(f);
+    return false;
+  }
+  std::vector<unsigned char> d((size_t)size);
+  const size_t got = fread(d.data(), 1, (size_t)size, f);
+  fclose(f);
+  if (got != (size_t)size || memcmp(d.data(), "Vgm ", 4) != 0) return false;
+
+  auto u32 = [&](size_t off) -> uint32_t {
+    if (off + 4 > d.size()) return 0;
+    return (uint32_t)d[off] | ((uint32_t)d[off + 1] << 8) |
+           ((uint32_t)d[off + 2] << 16) | ((uint32_t)d[off + 3] << 24);
+  };
+  size_t p = 0x34 + u32(0x34);
+  while (p < d.size()) {
+    const uint8_t c = d[p];
+    if (c == 0x52) {
+      if (p + 2 < d.size() && d[p + 1] == 0x2B && (d[p + 2] & 0x80)) return true;
+      p += 3;
+    } else if (c == 0x53) {
+      if (p + 2 < d.size() && d[p + 1] == 0x2B && (d[p + 2] & 0x80)) return true;
+      p += 3;
+    } else if (c == 0x61) {
+      p += 3;
+    } else if (c == 0x62 || c == 0x63) {
+      p += 1;
+    } else if (c >= 0x70 && c <= 0x7F) {
+      p += 1;
+    } else if (c == 0x50) {
+      p += 2;
+    } else if (c == 0x67) {
+      p += 7 + u32(p + 3);
+    } else if (c >= 0x30 && c <= 0x3F) {
+      p += 2;
+    } else if ((c >= 0x40 && c <= 0x4E) || (c >= 0x56 && c <= 0x5F) ||
+               (c >= 0xB0 && c <= 0xBF)) {
+      p += 3;
+    } else if (c == 0x4F) {
+      p += 2;
+    } else if (c == 0x66) {
+      break;
+    } else {
+      p += 1;
+    }
+  }
+  return false;
+}
+
 static bool read_file_exact(const char* name, std::vector<unsigned char>* out) {
   if (!out) return false;
   out->clear();
@@ -802,6 +858,7 @@ int main(int argc, char **argv) {
   bool is_spc = is_spc_path(mdx_name);
   bool is_psf = !is_spc && is_psf_path(mdx_name);
   bool is_vgm = !is_spc && !is_psf && is_vgm_path(mdx_name);
+  bool vgm_dac_used = false;
 
   // Recently played files, persisted between runs (up to 1024).
   std::vector<std::string> history = loadHistory();
@@ -898,6 +955,7 @@ int main(int argc, char **argv) {
     is_spc = is_spc_path(mdx_name);
     is_psf = !is_spc && is_psf_path(mdx_name);
     is_vgm = !is_spc && !is_psf && is_vgm_path(mdx_name);
+    vgm_dac_used = is_vgm && vgmUsesDac(mdx_name);
 
     // YM2151状態管理オブジェクト作成
     ym_state = new YM2151State();
@@ -926,6 +984,7 @@ int main(int argc, char **argv) {
                 ym2151_channels, adpcm_channels);
       }
     }
+    vgm_dac_used = is_vgm && vgmUsesDac(mdx_name);
     if (is_vgm) {
       ym2151_channels = 6;   // YM2612 FM channels
       adpcm_channels = 0;
@@ -933,7 +992,7 @@ int main(int argc, char **argv) {
     int window_height = is_psf
         ? 844
         : (is_spc ? 720
-                  : (is_vgm ? 75 + 6 * 70 + 45 + 4 * 45 + 20
+                  : (is_vgm ? 75 + 6 * 70 + (vgm_dac_used ? 45 : 0) + 4 * 45 + 20
                             : 75 + (ym2151_channels * 70) + (adpcm_channels * 45) + 20));
     // The spectrum strip is opt-in (--spectrum); without it the window is
     // narrower.  PSF never shows a spectrum.
@@ -980,6 +1039,7 @@ int main(int argc, char **argv) {
     visualizer->setSPCMode(is_spc);
     visualizer->setPSFMode(is_psf);
     visualizer->setVGMMode(is_vgm);
+    visualizer->setVGMDacUsed(vgm_dac_used);
 
     // 表示チャンネル数を設定
     visualizer->setDisplayChannels(is_spc ? 8 : ym2151_channels,
@@ -1081,6 +1141,7 @@ reload_file:
     visualizer->setSPCMode(is_spc);
     visualizer->setPSFMode(is_psf);
     visualizer->setVGMMode(is_vgm);
+    visualizer->setVGMDacUsed(vgm_dac_used);
     visualizer->setDisplayChannels(is_spc ? 8 : ym2151_channels,
                                   is_spc ? 0 : adpcm_channels);
   }

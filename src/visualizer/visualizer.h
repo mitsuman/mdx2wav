@@ -166,6 +166,9 @@ public:
     };
     void setPSFMode(bool enabled);
     void setVGMMode(bool enabled) { vgm_mode_ = enabled; }
+    // The DAC and FM channel 6 share the same hardware, so the DAC row is only
+    // shown for songs that actually use it.
+    void setVGMDacUsed(bool used) { vgm_dac_used_ = used; }
 
     // SN76489 PSG channels (3 tone + noise) for the VGM panel.
     struct PSGVoice {
@@ -323,6 +326,7 @@ private:
     PSGVoice psg_voices_[4];
     int psg_voice_count_;
     DACVoice dac_voice_;
+    bool vgm_dac_used_;
     int sample_rate_;
     PSFVoice psf_voices_[24];
     int psf_voice_count_;
