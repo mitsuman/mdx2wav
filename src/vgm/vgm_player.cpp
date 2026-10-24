@@ -364,6 +364,24 @@ int VgmFilePlayer::Generate(int16_t* out, int frames) {
   return got;
 }
 
+void VgmFilePlayer::GetDacState(DacState* out) const {
+  if (!out) return;
+  memset(out, 0, sizeof(*out));
+  if (!audio_) return;
+  out->enabled = audio_->DacEnabled();
+  uint32_t pos = 0;
+  const int16_t* ring = audio_->DacWave(&pos);
+  if (!ring) return;
+  const int count = kWaveformSamples;
+  for (int j = 0; j < count; j++) {
+    int v = ring[(pos - count + j) & (count - 1)] * 64;
+    if (v > 32767) v = 32767;
+    if (v < -32768) v = -32768;
+    out->waveform[j] = (int16_t)v;
+  }
+  out->waveform_samples = count;
+}
+
 void VgmFilePlayer::GetPsgStates(SN76489::ChannelState out[SN76489::kChannels]) const {
   psg_.GetStates(out);
 }

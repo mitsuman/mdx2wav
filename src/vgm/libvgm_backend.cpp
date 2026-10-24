@@ -55,6 +55,15 @@ const int16_t* LibVgmAudio::Ym2612Wave(int ch, uint32_t* pos) const {
   return nukedopn2_vis_wave(ch);
 }
 
+bool LibVgmAudio::DacEnabled() const {
+  return nukedopn2_vis_dac_enabled() != 0;
+}
+
+const int16_t* LibVgmAudio::DacWave(uint32_t* pos) const {
+  if (pos) *pos = nukedopn2_vis_dac_pos();
+  return nukedopn2_vis_dac();
+}
+
 bool LibVgmAudio::Load(const char* path, std::string* error) {
   PlayerA* player = static_cast<PlayerA*>(player_);
   if (!player) {

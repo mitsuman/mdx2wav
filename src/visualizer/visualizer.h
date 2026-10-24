@@ -177,6 +177,14 @@ public:
         int waveform_samples;
     };
     void setPSGStates(const PSGVoice* voices, int count);
+
+    // YM2612 DAC channel (PCM playback on channel 6).
+    struct DACVoice {
+        bool enabled;
+        int16_t waveform[1024];
+        int waveform_samples;
+    };
+    void setDACState(const DACVoice& voice);
     void setSampleRate(int rate) { sample_rate_ = rate; }
     bool isPSFMode() const { return psf_mode_; }
     void updatePSFState(const PSFVoice* voices, int count,
@@ -314,6 +322,7 @@ private:
     bool vgm_mode_;
     PSGVoice psg_voices_[4];
     int psg_voice_count_;
+    DACVoice dac_voice_;
     int sample_rate_;
     PSFVoice psf_voices_[24];
     int psf_voice_count_;
@@ -402,6 +411,7 @@ private:
     void renderTitle();
     void renderFiler();
     void renderVGMPSG(int& y);
+    void renderVGMDAC(int& y);
     void ensureHistoryVisible();
     void renderPSF();
     int filerRowCount() const;

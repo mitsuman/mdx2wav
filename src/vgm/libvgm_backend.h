@@ -22,6 +22,9 @@ class LibVgmAudio {
   bool ReadYm2612(int ch, int* fnum, int* block, int* alg, int* fb, int* panl,
                   int* panr, int* egout, int* kon) const;
   const int16_t* Ym2612Wave(int ch, uint32_t* pos) const;
+  // YM2612 DAC channel (channel 6 sample playback).
+  bool DacEnabled() const;
+  const int16_t* DacWave(uint32_t* pos) const;
   bool IsFinished() const { return finished_; }
 
  private:

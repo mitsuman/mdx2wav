@@ -1151,6 +1151,10 @@ void Visualizer::setHistory(const char** files, int count) {
     }
 }
 
+void Visualizer::setDACState(const DACVoice& voice) {
+    dac_voice_ = voice;
+}
+
 void Visualizer::setPSGStates(const PSGVoice* voices, int count) {
     psg_voice_count_ = std::max(0, std::min(count, 4));
     if (voices) {
@@ -2761,10 +2765,38 @@ void Visualizer::renderChannelInfo() {
     if (adpcm_display_channels_ > 0) {
         renderADPCMChannels(y);
     }
-    // VGM の SN76489 PSG (3 tone + noise)
+    // VGM の YM2612 DAC (チャンネル6のPCM) と SN76489 PSG
     if (vgm_mode_ && psg_voice_count_ > 0) {
+        renderVGMDAC(y);
         renderVGMPSG(y);
     }
+}
+
+void Visualizer::renderVGMDAC(int& y) {
+    const int row_h = 45;
+    const int wave_x = channelWaveformX();
+    const int wave_w = channelWaveformWidth();
+    const int wave_h = 41;
+    const DACVoice& v = dac_voice_;
+
+    const int seg_r = v.enabled ? CHANNEL_LABEL_COLOR_ACTIVE_R : CHANNEL_LABEL_COLOR_INACTIVE_R;
+    const int seg_g = v.enabled ? CHANNEL_LABEL_COLOR_ACTIVE_G : CHANNEL_LABEL_COLOR_INACTIVE_G;
+    const int seg_b = v.enabled ? CHANNEL_LABEL_COLOR_ACTIVE_B : CHANNEL_LABEL_COLOR_INACTIVE_B;
+
+    draw7Segment(20, y + 5, 6, seg_r, seg_g, seg_b, 8, 7);
+    renderBitmapText("DAC", 10, y + 23, seg_r, seg_g, seg_b);
+    renderBitmapText("YM2612", 10, y + 31, seg_r / 2, seg_g / 2, seg_b / 2);
+
+    renderBitmapText(v.enabled ? "PCM  DAC ON" : "PCM  DAC OFF", 86, y + 4,
+                     v.enabled ? 120 : 55, v.enabled ? 200 : 70,
+                     v.enabled ? 255 : 95);
+    renderBitmapText("6ch sample out", 86, y + 14, v.enabled ? 150 : 50,
+                     v.enabled ? 170 : 60, v.enabled ? 220 : 80);
+
+    renderChannelWaveform(wave_x, y + 2, wave_w, wave_h, v.waveform,
+                          v.enabled ? v.waveform_samples : 0, 255, 200, 120,
+                          8 + 4, 1.0f, true);
+    y += row_h;
 }
 
 void Visualizer::renderVGMPSG(int& y) {
@@ -2787,7 +2819,7 @@ void Visualizer::renderVGMPSG(int& y) {
         const int seg_g = v.active ? CHANNEL_LABEL_COLOR_ACTIVE_G : CHANNEL_LABEL_COLOR_INACTIVE_G;
         const int seg_b = v.active ? CHANNEL_LABEL_COLOR_ACTIVE_B : CHANNEL_LABEL_COLOR_INACTIVE_B;
 
-        draw7Segment(20, y + 5, 6 + i, seg_r, seg_g, seg_b, 8, 7);
+        draw7Segment(20, y + 5, 7 + i, seg_r, seg_g, seg_b, 8, 7);
         renderBitmapText("PSG", 10, y + 23, seg_r, seg_g, seg_b);
         renderBitmapText("SN76489", 10, y + 31, seg_r / 2, seg_g / 2, seg_b / 2);
 

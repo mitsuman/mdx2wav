@@ -933,7 +933,7 @@ int main(int argc, char **argv) {
     int window_height = is_psf
         ? 844
         : (is_spc ? 720
-                  : (is_vgm ? 75 + 6 * 70 + 4 * 45 + 20
+                  : (is_vgm ? 75 + 6 * 70 + 45 + 4 * 45 + 20
                             : 75 + (ym2151_channels * 70) + (adpcm_channels * 45) + 20));
     // The spectrum strip is opt-in (--spectrum); without it the window is
     // narrower.  PSF never shows a spectrum.
@@ -1378,6 +1378,17 @@ reload_file:
 #ifdef __APPLE__
           pthread_mutex_unlock(&g_vgm_audio_mutex);
 #endif
+          {
+            VgmFilePlayer::DacState dac;
+            vgm_player->GetDacState(&dac);
+            Visualizer::DACVoice dv;
+            dv.enabled = dac.enabled;
+            dv.waveform_samples = dac.waveform_samples;
+            for (int j = 0; j < dac.waveform_samples && j < 1024; j++) {
+              dv.waveform[j] = dac.waveform[j];
+            }
+            visualizer->setDACState(dv);
+          }
           {
             SN76489::ChannelState ps[SN76489::kChannels];
             vgm_player->GetPsgStates(ps);
