@@ -925,7 +925,7 @@ int main(int argc, char **argv) {
     int window_height = is_psf
         ? 844
         : (is_spc ? 720
-                  : (is_vgm ? 75 + 6 * 70 + 20
+                  : (is_vgm ? 75 + 6 * 70 + 4 * 45 + 20
                             : 75 + (ym2151_channels * 70) + (adpcm_channels * 45) + 20));
     // The spectrum strip is opt-in (--spectrum); without it the window is
     // narrower.  PSF never shows a spectrum.
@@ -1369,6 +1369,21 @@ reload_file:
 #ifdef __APPLE__
           pthread_mutex_unlock(&g_vgm_audio_mutex);
 #endif
+          {
+            SN76489::ChannelState ps[SN76489::kChannels];
+            vgm_player->GetPsgStates(ps);
+            Visualizer::PSGVoice pv[4];
+            for (int q = 0; q < 4; q++) {
+              pv[q].active = ps[q].active;
+              pv[q].note = ps[q].note;
+              pv[q].volume = ps[q].volume;
+              pv[q].waveform_samples = SN76489::kWaveformSamples;
+              for (int j = 0; j < SN76489::kWaveformSamples; j++) {
+                pv[q].waveform[j] = ps[q].waveform[j];
+              }
+            }
+            visualizer->setPSGStates(pv, 4);
+          }
           for (int ch = 0; ch < VGMPlayer::kFmChannels; ch++) {
             int eg_out[4];
             int eg_phase[4];

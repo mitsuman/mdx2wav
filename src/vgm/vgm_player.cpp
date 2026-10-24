@@ -321,6 +321,10 @@ int VGMPlayer::Generate(int16_t* out, int frames) {
   return frames;
 }
 
+void VGMPlayer::GetPsgStates(SN76489::ChannelState out[SN76489::kChannels]) const {
+  psg_.GetStates(out);
+}
+
 void VGMPlayer::GetVoiceStates(VoiceState out[kFmChannels]) const {
   for (int ch = 0; ch < kFmChannels; ch++) {
     VoiceState& s = out[ch];

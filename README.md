@@ -105,7 +105,8 @@ so it is opt-in.
 `.vgm` files (or files starting with the `Vgm ` signature) are played with
 Nuked-OPN2 (LGPL-2.1) for the YM2612 and a small SN76489 PSG, i.e. Sega Mega
 Drive style logs.  The visualizer reuses the YM2151 layout with six FM
-channels.  Other chips (YM2151, YM2608, ...) and GD3 titles are not handled
+channels plus a PSG section (three tone channels and noise, with note,
+volume and waveform).  Other chips (YM2151, YM2608, ...) and GD3 titles are not handled
 yet; the title is taken from the file name.
 
 ## PSF support

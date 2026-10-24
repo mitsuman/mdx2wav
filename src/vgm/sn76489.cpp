@@ -1,5 +1,7 @@
 #include "sn76489.h"
 
+#include <math.h>
+
 SN76489::SN76489() {
   Reset(3579545);
 }
@@ -17,6 +19,10 @@ void SN76489::Reset(int clock) {
   noise_white_ = false;
   latch_ = 0;
   latched_ = false;
+  for (int i = 0; i < kChannels; i++) {
+    wave_pos_[i] = 0;
+    for (int j = 0; j < kWaveformSamples; j++) wave_[i][j] = 0;
+  }
 }
 
 double SN76489::StepForPeriod(int period) const {
@@ -79,6 +85,26 @@ void SN76489::Write(uint8_t data) {
   }
 }
 
+void SN76489::GetStates(ChannelState out[kChannels]) const {
+  for (int i = 0; i < kChannels; i++) {
+    ChannelState& s = out[i];
+    s.period = (i < 3) ? tone_[i].period : 0;
+    s.volume = (i < 3) ? tone_[i].volume : noise_.volume;
+    s.active = s.volume < 15;
+    if (i < 3) {
+      const double freq = (double)clock_ / (32.0 * (double)(s.period ? s.period : 1));
+      const double note = 69.0 + 12.0 * log2(freq / 440.0);
+      s.note = (note >= 0.0 && note <= 127.0) ? (int)(note + 0.5) : -1;
+    } else {
+      s.note = -1;
+    }
+    for (int j = 0; j < kWaveformSamples; j++) {
+      s.waveform[j] = wave_[i][(wave_pos_[i] - kWaveformSamples + j) &
+                               (kWaveformSamples - 1)];
+    }
+  }
+}
+
 void SN76489::Generate(int16_t* left, int16_t* right) {
   int mix = 0;
 
@@ -113,6 +139,18 @@ void SN76489::Generate(int16_t* left, int16_t* right) {
       }
     }
     if (noise_.output) mix += Amplitude(noise_.volume);
+  }
+
+  // Capture each channel's own output for the visualizer.
+  for (int i = 0; i < 3; i++) {
+    const int a = Amplitude(tone_[i].volume);
+    const int16_t v = (int16_t)(tone_[i].output ? a : -a);
+    wave_[i][wave_pos_[i]++ & (kWaveformSamples - 1)] = v;
+  }
+  {
+    const int a = Amplitude(noise_.volume);
+    const int16_t v = (int16_t)(noise_.output ? a : -a);
+    wave_[3][wave_pos_[3]++ & (kWaveformSamples - 1)] = v;
   }
 
   if (mix > 32767) mix = 32767;

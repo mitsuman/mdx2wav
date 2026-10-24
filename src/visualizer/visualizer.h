@@ -166,6 +166,16 @@ public:
     };
     void setPSFMode(bool enabled);
     void setVGMMode(bool enabled) { vgm_mode_ = enabled; }
+
+    // SN76489 PSG channels (3 tone + noise) for the VGM panel.
+    struct PSGVoice {
+        bool active;
+        int note;
+        int volume;       // attenuation 0..15
+        int16_t waveform[1024];
+        int waveform_samples;
+    };
+    void setPSGStates(const PSGVoice* voices, int count);
     void setSampleRate(int rate) { sample_rate_ = rate; }
     bool isPSFMode() const { return psf_mode_; }
     void updatePSFState(const PSFVoice* voices, int count,
@@ -301,6 +311,8 @@ private:
     // ファイルリスト管理
     bool psf_mode_;
     bool vgm_mode_;
+    PSGVoice psg_voices_[4];
+    int psg_voice_count_;
     int sample_rate_;
     PSFVoice psf_voices_[24];
     int psf_voice_count_;
@@ -388,6 +400,7 @@ private:
     // 描画メソッド
     void renderTitle();
     void renderFiler();
+    void renderVGMPSG(int& y);
     void ensureHistoryVisible();
     void renderPSF();
     int filerRowCount() const;

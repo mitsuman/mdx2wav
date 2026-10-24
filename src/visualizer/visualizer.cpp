@@ -110,6 +110,7 @@ Visualizer::Visualizer()
     , current_file_index_(0)
     , psf_mode_(false)
     , vgm_mode_(false)
+    , psg_voice_count_(0)
     , sample_rate_(44100)
     , psf_voice_count_(0)
     , psf_master_left_(0)
@@ -1139,6 +1140,13 @@ void Visualizer::setHistory(const char** files, int count) {
     }
     if (history_selection_ >= (int)history_.size()) {
         history_selection_ = history_.empty() ? 0 : (int)history_.size() - 1;
+    }
+}
+
+void Visualizer::setPSGStates(const PSGVoice* voices, int count) {
+    psg_voice_count_ = std::max(0, std::min(count, 4));
+    if (voices) {
+        for (int i = 0; i < psg_voice_count_; i++) psg_voices_[i] = voices[i];
     }
 }
 
@@ -2744,6 +2752,49 @@ void Visualizer::renderChannelInfo() {
     // ADPCMチャンネル (8-15) の表示
     if (adpcm_display_channels_ > 0) {
         renderADPCMChannels(y);
+    }
+    // VGM の SN76489 PSG (3 tone + noise)
+    if (vgm_mode_ && psg_voice_count_ > 0) {
+        renderVGMPSG(y);
+    }
+}
+
+void Visualizer::renderVGMPSG(int& y) {
+    const int row_h = 45;
+    const int wave_x = 800;
+    const int wave_w = 256;
+    const int wave_h = 40;
+
+    for (int i = 0; i < psg_voice_count_; i++) {
+        const PSGVoice& v = psg_voices_[i];
+        const int seg_r = v.active ? CHANNEL_LABEL_COLOR_ACTIVE_R : CHANNEL_LABEL_COLOR_INACTIVE_R;
+        const int seg_g = v.active ? CHANNEL_LABEL_COLOR_ACTIVE_G : CHANNEL_LABEL_COLOR_INACTIVE_G;
+        const int seg_b = v.active ? CHANNEL_LABEL_COLOR_ACTIVE_B : CHANNEL_LABEL_COLOR_INACTIVE_B;
+
+        draw7Segment(20, y + 5, 6 + i, seg_r, seg_g, seg_b, 8, 7);
+        renderBitmapText("PSG", 10, y + 23, seg_r, seg_g, seg_b);
+        renderBitmapText("SN76489", 10, y + 31, seg_r / 2, seg_g / 2, seg_b / 2);
+
+        char text[64];
+        if (i < 3 && v.note >= 0 && v.note <= 127) {
+            snprintf(text, sizeof(text), "NOTE %s%d", getNoteName(v.note),
+                     v.note / 12 - 1);
+        } else if (i < 3) {
+            snprintf(text, sizeof(text), "NOTE ---");
+        } else {
+            snprintf(text, sizeof(text), "NOISE");
+        }
+        renderBitmapText(text, 42, y + 4, v.active ? 120 : 55,
+                         v.active ? 200 : 70, v.active ? 255 : 95);
+
+        snprintf(text, sizeof(text), "VOL %X", 15 - v.volume);
+        renderBitmapText(text, 42, y + 14, v.active ? 170 : 50,
+                         v.active ? 175 : 55, v.active ? 220 : 80);
+
+        renderChannelWaveform(wave_x, y + 2, wave_w, wave_h, v.waveform,
+                              v.active ? v.waveform_samples : 0, 120, 200, 255,
+                              8 + i, 1.0f, true);
+        y += row_h;
     }
 }
 

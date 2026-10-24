@@ -34,6 +34,7 @@ class VGMPlayer {
   const char* Title() const { return title_.c_str(); }
   int SampleRate() const { return 44100; }
   void GetVoiceStates(VoiceState out[kFmChannels]) const;
+  void GetPsgStates(SN76489::ChannelState out[SN76489::kChannels]) const;
   int FmChannelCount() const { return has_opn2_ ? kFmChannels : 0; }
   bool HasPsg() const { return has_psg_; }
 

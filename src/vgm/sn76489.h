@@ -9,8 +9,19 @@ class SN76489 {
  public:
   SN76489();
 
+  enum { kChannels = 4, kWaveformSamples = 1024 };
+
+  struct ChannelState {
+    bool active;
+    int note;        // MIDI note (tone channels), -1 for noise
+    int period;
+    int volume;      // attenuation 0..15
+    int16_t waveform[kWaveformSamples];
+  };
+
   void Reset(int clock);
   void Write(uint8_t data);
+  void GetStates(ChannelState out[kChannels]) const;
   // Adds one sample (at 44100 Hz) to the left/right accumulators.
   void Generate(int16_t* left, int16_t* right);
 
@@ -30,6 +41,8 @@ class SN76489 {
   bool latched_ = false;
   Tone tone_[3];
   Tone noise_;
+  int16_t wave_[kChannels][kWaveformSamples];
+  uint32_t wave_pos_[kChannels] = {0, 0, 0, 0};
   uint16_t lfsr_ = 0x8000;
   int noise_shift_ = 0;
   bool noise_white_ = false;
