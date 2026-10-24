@@ -1565,6 +1565,35 @@ void NOPN2_GenerateResampled(ym3438_t *chip, Bit32s *buf)
     chip->samplecnt += 1 << RSM_FRAC;
 }
 
+/* mdx2wav visualizer support: per-channel output captured at the output rate. */
+#define VIS_CHANNELS 6
+#define VIS_SAMPLES 1024
+static Bit16s g_vis_wave[VIS_CHANNELS][VIS_SAMPLES];
+static Bit32u g_vis_pos[VIS_CHANNELS];
+
+const INT16* nukedopn2_vis_wave(int ch)
+{
+    return g_vis_wave[ch & 7];
+}
+UINT32 nukedopn2_vis_pos(int ch)
+{
+    return g_vis_pos[ch & 7];
+}
+void nukedopn2_vis_state(void* chip, int ch, int* fnum, int* block, int* alg, int* fb,
+                         int* panl, int* panr, int* egout, int* kon)
+{
+    ym3438_t* opn2 = (ym3438_t*)chip;
+    int op;
+    *fnum = opn2->fnum[ch];
+    *block = opn2->block[ch];
+    *alg = opn2->connect[ch];
+    *fb = opn2->fb[ch];
+    *panl = opn2->pan_l[ch];
+    *panr = opn2->pan_r[ch];
+    *kon = opn2->eg_kon[ch] ? 1 : 0;
+    for (op = 0; op < 4; op ++) egout[op] = opn2->eg_out[ch + op * 6];
+}
+
 void nukedopn2_update(void *chip, UINT32 numsamples, DEV_SMPL **sndptr)
 {
     ym3438_t* opn2 = (ym3438_t*)chip;
@@ -1576,9 +1605,12 @@ void nukedopn2_update(void *chip, UINT32 numsamples, DEV_SMPL **sndptr)
 
     for (i = 0; i < numsamples; i++)
     {
+        int ch;
         NOPN2_GenerateResampled(opn2, buffer);
         *smpl++ = buffer[0];
         *smpr++ = buffer[1];
+        for (ch = 0; ch < VIS_CHANNELS; ch ++)
+            g_vis_wave[ch][g_vis_pos[ch] ++ & (VIS_SAMPLES - 1)] = opn2->ch_out[ch];
     }
 }
 

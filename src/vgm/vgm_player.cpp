@@ -372,6 +372,40 @@ void VgmFilePlayer::GetVoiceStates(VoiceState out[kFmChannels]) const {
   for (int ch = 0; ch < kFmChannels; ch++) {
     VoiceState& s = out[ch];
     memset(&s, 0, sizeof(s));
+
+    // Prefer the chip libvgm is actually playing, so the display always
+    // matches the audio.
+    if (audio_) {
+      int fnum = 0, block = 0, alg = 0, fb = 0, pl = 0, pr = 0, kon = 0;
+      int eo[4] = {0, 0, 0, 0};
+      if (audio_->ReadYm2612(ch, &fnum, &block, &alg, &fb, &pl, &pr, eo, &kon)) {
+        s.fnum = fnum;
+        s.block = block;
+        s.algorithm = alg;
+        s.feedback = fb;
+        s.pan_left = pl;
+        s.pan_right = pr;
+        s.key_on = kon;
+        for (int op = 0; op < 4; op++) s.eg_out[op] = eo[op];
+        s.note = FnumToNote(fnum, block, opn2_clock_);
+        s.active = kon != 0 || eo[0] < 1023 || eo[1] < 1023 ||
+                   eo[2] < 1023 || eo[3] < 1023;
+        uint32_t pos = 0;
+        const int16_t* ring = audio_->Ym2612Wave(ch, &pos);
+        if (ring) {
+          const int count = kWaveformSamples;
+          for (int j = 0; j < count; j++) {
+            int v = ring[(pos - count + j) & (count - 1)] * 64;
+            if (v > 32767) v = 32767;
+            if (v < -32768) v = -32768;
+            s.waveform[j] = (int16_t)v;
+          }
+          s.waveform_samples = count;
+        }
+        continue;
+      }
+    }
+
     if (!has_opn2_) continue;
     s.fnum = opn2_.fnum[ch];
     s.block = opn2_.block[ch];

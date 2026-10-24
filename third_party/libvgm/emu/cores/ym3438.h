@@ -5,6 +5,17 @@
 #include "../snddef.h"
 
 void nukedopn2_write(void *chip, UINT8 port, UINT8 data);
+/* mdx2wav visualizer support (per-channel output, captured at the output rate) */
+#ifdef __cplusplus
+extern "C" {
+#endif
+const INT16* nukedopn2_vis_wave(int ch);
+UINT32 nukedopn2_vis_pos(int ch);
+void nukedopn2_vis_state(void* chip, int ch, int* fnum, int* block, int* alg, int* fb,
+                         int* panl, int* panr, int* egout, int* kon);
+#ifdef __cplusplus
+}
+#endif
 UINT8 nukedopn2_read(void *chip, UINT8 port);
 void nukedopn2_update(void *chip, UINT32 numsamples, DEV_SMPL **sndptr);
 void nukedopn2_set_options(void *chip, UINT32 flags);

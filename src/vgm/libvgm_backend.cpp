@@ -6,6 +6,23 @@
 #include "../../third_party/libvgm/player/playera.hpp"
 #include "../../third_party/libvgm/player/vgmplayer.hpp"
 #include "../../third_party/libvgm/utils/FileLoader.h"
+#include "../../third_party/libvgm/emu/EmuCores.h"
+#include "../../third_party/libvgm/emu/cores/ym3438.h"
+
+// Expose the player's device list so the visualizer can read the very same
+// YM2612 that produces the audio.
+class VisVGMPlayer : public VGMPlayer {
+ public:
+  void* Ym2612Chip() const {
+    for (size_t i = 0; i < _devices.size(); i++) {
+      const CHIP_DEVICE& d = _devices[i];
+      if (!d.base.defInf.dataPtr || !d.base.defInf.devDef) continue;
+      if (d.base.defInf.devDef->coreID != FCC_NUKE) continue;
+      return d.base.defInf.dataPtr;
+    }
+    return nullptr;
+  }
+};
 
 LibVgmAudio::LibVgmAudio()
     : player_(nullptr), engine_(nullptr), loader_(nullptr), finished_(false) {}
@@ -23,11 +40,26 @@ LibVgmAudio::~LibVgmAudio() {
   if (loader) DataLoader_Deinit(loader);
 }
 
+bool LibVgmAudio::ReadYm2612(int ch, int* fnum, int* block, int* alg, int* fb,
+                             int* panl, int* panr, int* egout, int* kon) const {
+  VisVGMPlayer* engine = static_cast<VisVGMPlayer*>(const_cast<void*>(engine_));
+  if (!engine) return false;
+  void* chip = engine->Ym2612Chip();
+  if (!chip) return false;
+  nukedopn2_vis_state(chip, ch, fnum, block, alg, fb, panl, panr, egout, kon);
+  return true;
+}
+
+const int16_t* LibVgmAudio::Ym2612Wave(int ch, uint32_t* pos) const {
+  if (pos) *pos = nukedopn2_vis_pos(ch);
+  return nukedopn2_vis_wave(ch);
+}
+
 bool LibVgmAudio::Load(const char* path, std::string* error) {
   PlayerA* player = static_cast<PlayerA*>(player_);
   if (!player) {
     player = new PlayerA();
-    VGMPlayer* engine = new VGMPlayer();
+    VisVGMPlayer* engine = new VisVGMPlayer();
     player->RegisterPlayerEngine(engine);
     player->SetOutputSettings(44100, 2, 16, 4096);
     player_ = player;

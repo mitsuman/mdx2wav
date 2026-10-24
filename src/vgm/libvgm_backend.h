@@ -18,6 +18,10 @@ class LibVgmAudio {
   // frames written (0 when the song has ended).
   int Render(int16_t* out, int frames);
   double TotalTime() const;
+  // YM2612 state read from the chip libvgm is playing.
+  bool ReadYm2612(int ch, int* fnum, int* block, int* alg, int* fb, int* panl,
+                  int* panr, int* egout, int* kon) const;
+  const int16_t* Ym2612Wave(int ch, uint32_t* pos) const;
   bool IsFinished() const { return finished_; }
 
  private:
